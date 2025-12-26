@@ -1,0 +1,5 @@
+{
+  "name": "SecuriScan AI",
+  "description": "Yapay zeka destekli web sitesi güvenlik açığı simülasyon ve analiz aracı.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,305 @@
+/**
+ * OpenRouter AI Service
+ *
+ * Integrates with OpenRouter API to perform AI-powered security analysis
+ * Uses Google Gemini model through OpenRouter
+ */
+
+import axios from 'axios';
+import { OPENROUTER_API_KEY, CLIENT_URL } from '../config/env';
+
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const MODEL = 'google/gemini-flash-1.5-8b'; // Using Gemini Flash model
+
+interface SecurityReport {
+  targetUrl: string;
+  scanTimestamp: string;
+  overallScore: number;
+  vulnerabilities: any[];
+  summary: string;
+  techStackDetected: any[];
+  compliance: any[];
+  networkInfo: any;
+  headers: any[];
+  ssl: any;
+  subdomains: any[];
+  darkWebLeaks: any[];
+  actionPlan: any[];
+}
+
+/**
+ * Get system prompt for AI based on language
+ */
+function getSystemPrompt(lang: 'tr' | 'en'): string {
+  if (lang === 'tr') {
+    return `Sen bir siber güvenlik uzmanısın. Verilen URL'i analiz ederek kapsamlı bir güvenlik raporu oluştur.
+
+Rapor şu bilgileri içermeli:
+- Genel güvenlik skoru (0-100)
+- Tespit edilen zafiyetler (OWASP Top 10 standartlarına göre)
+- Teknoloji yığını (web sunucusu, framework, kütüphaneler)
+- SSL/TLS durumu
+- Güvenlik başlıkları (headers) analizi
+- Network bilgileri (IP, konum, ISP)
+- Uyumluluk kontrolü (KVKK, GDPR)
+- Öncelikli eylem planı
+
+JSON formatında yanıt ver. Her zafiyet için şunları ekle:
+- id, title, description, severity (Kritik/Yüksek/Orta/Düşük/Bilgi)
+- location, remediation, cvssScore, exploitExample
+- exploitablePaths (istismar senaryoları)
+- relatedCves (ilgili CVE'ler)`;
+  } else {
+    return `You are a cybersecurity expert. Analyze the given URL and create a comprehensive security report.
+
+The report should include:
+- Overall security score (0-100)
+- Detected vulnerabilities (based on OWASP Top 10 standards)
+- Technology stack (web server, framework, libraries)
+- SSL/TLS status
+- Security headers analysis
+- Network information (IP, location, ISP)
+- Compliance check (GDPR, ISO)
+- Prioritized action plan
+
+Respond in JSON format. For each vulnerability include:
+- id, title, description, severity (Critical/High/Medium/Low/Info)
+- location, remediation, cvssScore, exploitExample
+- exploitablePaths (exploitation scenarios)
+- relatedCves (related CVEs)`;
+  }
+}
+
+/**
+ * Build security analysis prompt
+ */
+function buildSecurityPrompt(url: string, lang: 'tr' | 'en'): string {
+  if (lang === 'tr') {
+    return `Aşağıdaki URL için detaylı güvenlik analizi yap:
+${url}
+
+Lütfen tam ve gerçekçi bir güvenlik raporu oluştur. Rapor JSON formatında olmalı ve şu yapıda olmalı:
+{
+  "targetUrl": "${url}",
+  "scanTimestamp": "ISO 8601 tarih",
+  "overallScore": number,
+  "summary": "Genel değerlendirme",
+  "vulnerabilities": [...],
+  "techStackDetected": [...],
+  "networkInfo": {...},
+  "headers": [...],
+  "ssl": {...},
+  "subdomains": [...],
+  "darkWebLeaks": [...],
+  "actionPlan": [...],
+  "compliance": [...]
+}`;
+  } else {
+    return `Perform a detailed security analysis for the following URL:
+${url}
+
+Please create a complete and realistic security report. The report should be in JSON format with this structure:
+{
+  "targetUrl": "${url}",
+  "scanTimestamp": "ISO 8601 date",
+  "overallScore": number,
+  "summary": "Overall assessment",
+  "vulnerabilities": [...],
+  "techStackDetected": [...],
+  "networkInfo": {...},
+  "headers": [...],
+  "ssl": {...},
+  "subdomains": [...],
+  "darkWebLeaks": [...],
+  "actionPlan": [...],
+  "compliance": [...]
+}`;
+  }
+}
+
+/**
+ * Parse AI response and extract JSON
+ */
+function parseAIResponse(responseData: any): SecurityReport {
+  try {
+    const content = responseData.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('Empty response from AI');
+    }
+
+    // Try to extract JSON from markdown code blocks or plain text
+    let jsonText = content;
+    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) || content.match(/```\n?([\s\S]*?)\n?```/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[1];
+    }
+
+    const parsed = JSON.parse(jsonText);
+    return parsed;
+  } catch (error) {
+    console.error('Failed to parse AI response:', error);
+    throw new Error('Invalid response format from AI');
+  }
+}
+
+/**
+ * Analyze URL with AI
+ *
+ * @param url - The URL to analyze
+ * @param lang - Language for the report (tr or en)
+ * @returns Security report
+ */
+export async function analyzeUrlWithAI(url: string, lang: 'tr' | 'en' = 'tr'): Promise<SecurityReport> {
+  // Mock mode for development without API key
+  if (OPENROUTER_API_KEY === 'PLACEHOLDER_API_KEY') {
+    console.log('[OpenRouter] Running in MOCK MODE - returning sample data');
+    return getMockSecurityReport(url, lang);
+  }
+
+  try {
+    const response = await axios.post(
+      OPENROUTER_API_URL,
+      {
+        model: MODEL,
+        messages: [
+          { role: 'system', content: getSystemPrompt(lang) },
+          { role: 'user', content: buildSecurityPrompt(url, lang) }
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': CLIENT_URL,
+          'X-Title': 'SecuriScan AI',
+        },
+        timeout: 60000, // 60 second timeout
+      }
+    );
+
+    return parseAIResponse(response.data);
+  } catch (error: any) {
+    if (error.response) {
+      console.error('OpenRouter API Error:', {
+        status: error.response.status,
+        data: error.response.data,
+      });
+      throw new Error(`AI analysis failed: ${error.response.data?.error?.message || 'Unknown error'}`);
+    } else if (error.request) {
+      console.error('Network error calling OpenRouter:', error.message);
+      throw new Error('Failed to connect to AI service');
+    } else {
+      console.error('Error setting up AI request:', error.message);
+      throw new Error('Internal error during AI analysis');
+    }
+  }
+}
+
+/**
+ * Generate mock security report for development/testing
+ */
+function getMockSecurityReport(url: string, lang: 'tr' | 'en'): SecurityReport {
+  const domain = url.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
+
+  return {
+    targetUrl: url,
+    scanTimestamp: new Date().toISOString(),
+    overallScore: 75,
+    summary: lang === 'tr'
+      ? 'Sistem genel olarak güvenli ancak bazı iyileştirmeler gerekiyor.'
+      : 'System is generally secure but some improvements are needed.',
+    vulnerabilities: [
+      {
+        id: 'VULN-001',
+        title: lang === 'tr' ? 'Eksik Güvenlik Başlıkları' : 'Missing Security Headers',
+        description: lang === 'tr'
+          ? 'Content-Security-Policy ve X-Frame-Options başlıkları eksik.'
+          : 'Missing Content-Security-Policy and X-Frame-Options headers.',
+        severity: 'Yüksek',
+        location: 'HTTP Headers',
+        remediation: lang === 'tr'
+          ? 'Güvenlik başlıklarını sunucu konfigürasyonuna ekleyin.'
+          : 'Add security headers to server configuration.',
+        cvssScore: 6.5,
+        exploitExample: `curl -I ${url}`,
+        exploitablePaths: [
+          {
+            description: lang === 'tr' ? 'Clickjacking saldırısı' : 'Clickjacking attack',
+            scenario: lang === 'tr' ? 'Site iframe içine gömülebilir' : 'Site can be embedded in iframe',
+            impact: lang === 'tr' ? 'Kullanıcı bilgileri risk altında' : 'User information at risk'
+          }
+        ],
+        relatedCves: [{ name: 'CWE-1021', url: 'https://cwe.mitre.org/data/definitions/1021.html' }]
+      }
+    ],
+    techStackDetected: [
+      {
+        name: 'Nginx 1.18',
+        description: lang === 'tr' ? 'Web sunucusu' : 'Web server',
+        commonRisks: [{ name: 'CVE-2021-23017' }]
+      }
+    ],
+    networkInfo: {
+      ip: '104.26.10.229',
+      location: lang === 'tr' ? 'Frankfurt, Almanya' : 'Frankfurt, Germany',
+      isp: 'Cloudflare',
+      asn: 'AS13335',
+      organization: 'Cloudflare Inc.',
+      serverType: 'cloudflare',
+      ports: [80, 443]
+    },
+    headers: [
+      {
+        key: 'Content-Security-Policy',
+        value: 'Missing',
+        status: 'WARNING',
+        description: lang === 'tr' ? 'XSS riskini artırır' : 'Increases XSS risk'
+      }
+    ],
+    ssl: {
+      issuer: "Let's Encrypt",
+      validFrom: '2024-01-01',
+      validTo: '2024-12-31',
+      daysRemaining: 180,
+      protocol: 'TLSv1.3',
+      grade: 'A'
+    },
+    subdomains: [
+      { name: `api.${domain}`, ip: '104.26.11.230', status: 'CLOUDFLARE' },
+      { name: `www.${domain}`, ip: '104.26.10.229', status: 'ACTIVE' }
+    ],
+    darkWebLeaks: [
+      {
+        source: 'Sample Database',
+        date: '2024-01-15',
+        type: 'Email',
+        severity: 'MEDIUM'
+      }
+    ],
+    actionPlan: [
+      {
+        task: lang === 'tr' ? 'Güvenlik başlıklarını ekle' : 'Add security headers',
+        priority: 'URGENT',
+        effort: 'LOW',
+        estimatedTime: lang === 'tr' ? '1-2 Saat' : '1-2 Hours',
+        delayImpact: lang === 'tr' ? 'XSS riski devam eder' : 'XSS risk continues'
+      },
+      {
+        task: lang === 'tr' ? 'SSL sertifikasını yenile' : 'Renew SSL certificate',
+        priority: 'HIGH',
+        effort: 'LOW',
+        estimatedTime: lang === 'tr' ? '30 Dakika' : '30 Minutes',
+        delayImpact: lang === 'tr' ? 'Sertifika süresi dolabilir' : 'Certificate may expire'
+      }
+    ],
+    compliance: [
+      {
+        standard: 'GDPR',
+        status: 'WARNING',
+        details: lang === 'tr' ? 'Bazı iyileştirmeler gerekli' : 'Some improvements needed'
+      }
+    ]
+  };
+}
