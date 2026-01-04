@@ -1,9 +1,11 @@
 /**
  * DNS Scanner
  * Performs DNS lookups and subdomain enumeration
+ * Including Certificate Transparency (crt.sh) integration
  */
 
 import * as dns from 'dns/promises';
+import axios from 'axios';
 import { COMMON_SUBDOMAINS } from '../utils/security-constants';
 
 export interface DNSInfo {
@@ -14,7 +16,15 @@ export interface DNSInfo {
 export interface SubdomainInfo {
   name: string;
   ip: string;
-  status: 'ACTIVE' | 'CLOUDFLARE' | 'HIDDEN';
+  status: 'ACTIVE' | 'CLOUDFLARE' | 'HIDDEN' | 'TAKEOVER_RISK';
+  source?: 'wordlist' | 'crt.sh';
+}
+
+export interface SubdomainTakeoverResult {
+  subdomain: string;
+  vulnerable: boolean;
+  service: string;
+  evidence: string;
 }
 
 /**
@@ -194,4 +204,268 @@ export async function getTXTRecords(hostname: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+// ==================== CRT.SH INTEGRATION ====================
+
+/**
+ * Get subdomains from Certificate Transparency logs via crt.sh
+ * @param hostname - The root domain to search
+ * @returns Array of unique subdomains found in CT logs
+ */
+export async function getSubdomainsFromCT(hostname: string): Promise<string[]> {
+  try {
+    const response = await axios.get(`https://crt.sh/?q=%.${hostname}&output=json`, {
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'SecuriScan Security Scanner',
+      },
+    });
+
+    if (!Array.isArray(response.data)) {
+      return [];
+    }
+
+    // Extract unique subdomains
+    const subdomains = new Set<string>();
+
+    for (const cert of response.data) {
+      const nameValue = cert.name_value;
+      if (!nameValue) continue;
+
+      // Split by newline (certificates can have multiple names)
+      const names = nameValue.split('\n');
+
+      for (const name of names) {
+        const cleanName = name.trim().toLowerCase();
+
+        // Skip wildcards and the root domain
+        if (cleanName.startsWith('*.')) continue;
+        if (cleanName === hostname) continue;
+
+        // Only include subdomains of the target domain
+        if (cleanName.endsWith(`.${hostname}`)) {
+          subdomains.add(cleanName);
+        }
+      }
+    }
+
+    // Limit to prevent overwhelming
+    return Array.from(subdomains).slice(0, 200);
+  } catch (error) {
+    console.error('[DNS] crt.sh lookup failed:', error);
+    return [];
+  }
+}
+
+/**
+ * Enhanced subdomain scanning with crt.sh integration
+ * @param hostname - The root domain to scan
+ * @returns Array of discovered subdomains with their IPs
+ */
+export async function scanSubdomainsEnhanced(hostname: string): Promise<SubdomainInfo[]> {
+  const results: SubdomainInfo[] = [];
+  const checkedSubdomains = new Set<string>();
+
+  console.log(`[DNS] Starting enhanced subdomain scan for ${hostname}`);
+
+  // Step 1: Get subdomains from Certificate Transparency
+  console.log('[DNS] Fetching subdomains from crt.sh...');
+  const ctSubdomains = await getSubdomainsFromCT(hostname);
+  console.log(`[DNS] Found ${ctSubdomains.length} subdomains from crt.sh`);
+
+  // Step 2: Combine with wordlist
+  const wordlistSubdomains = COMMON_SUBDOMAINS.slice(0, 100).map(s => `${s}.${hostname}`);
+  const allSubdomains = [...new Set([...ctSubdomains, ...wordlistSubdomains])];
+
+  console.log(`[DNS] Total unique subdomains to check: ${allSubdomains.length}`);
+
+  // Step 3: Resolve all subdomains
+  const batchSize = 15;
+  for (let i = 0; i < allSubdomains.length; i += batchSize) {
+    const batch = allSubdomains.slice(i, i + batchSize);
+
+    const batchResults = await Promise.allSettled(
+      batch.map(async (subdomain) => {
+        if (checkedSubdomains.has(subdomain)) return null;
+        checkedSubdomains.add(subdomain);
+
+        try {
+          const addresses = await dns.resolve4(subdomain);
+          const ip = addresses[0];
+          const isCloudflare = isCloudflareIP(ip);
+          const source = ctSubdomains.includes(subdomain) ? 'crt.sh' : 'wordlist';
+
+          return {
+            name: subdomain,
+            ip,
+            status: isCloudflare ? 'CLOUDFLARE' as const : 'ACTIVE' as const,
+            source: source as 'wordlist' | 'crt.sh',
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    batchResults.forEach((result) => {
+      if (result.status === 'fulfilled' && result.value) {
+        results.push(result.value);
+      }
+    });
+
+    // Rate limiting
+    if (i + batchSize < allSubdomains.length) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  console.log(`[DNS] Found ${results.length} active subdomains`);
+  return results;
+}
+
+// ==================== SUBDOMAIN TAKEOVER ====================
+
+// Services known to be vulnerable to subdomain takeover
+const TAKEOVER_FINGERPRINTS = [
+  { service: 'GitHub Pages', pattern: /There isn't a GitHub Pages site here/i },
+  { service: 'Heroku', pattern: /No such app|There is no app configured at that hostname/i },
+  { service: 'AWS S3', pattern: /NoSuchBucket|The specified bucket does not exist/i },
+  { service: 'Azure', pattern: /404 Web Site not found/i },
+  { service: 'Shopify', pattern: /Sorry, this shop is currently unavailable/i },
+  { service: 'Tumblr', pattern: /There's nothing here|Whatever you were looking for doesn't currently exist/i },
+  { service: 'WordPress.com', pattern: /Do you want to register/i },
+  { service: 'Zendesk', pattern: /Help Center Closed/i },
+  { service: 'Fastly', pattern: /Fastly error: unknown domain/i },
+  { service: 'Pantheon', pattern: /404 error unknown site/i },
+  { service: 'Netlify', pattern: /Not Found - Request ID/i },
+  { service: 'Cargo', pattern: /If you're moving your domain away/i },
+  { service: 'Surge', pattern: /project not found/i },
+  { service: 'Bitbucket', pattern: /Repository not found/i },
+];
+
+/**
+ * Check if a subdomain is vulnerable to takeover
+ * @param subdomain - The subdomain to check
+ * @returns Takeover result
+ */
+export async function checkSubdomainTakeover(subdomain: string): Promise<SubdomainTakeoverResult | null> {
+  try {
+    // First check if it has a CNAME record
+    let cname: string | null = null;
+    try {
+      const cnameRecords = await dns.resolveCname(subdomain);
+      cname = cnameRecords[0];
+    } catch {
+      // No CNAME record
+      return null;
+    }
+
+    if (!cname) return null;
+
+    // Try to fetch the subdomain
+    try {
+      const response = await axios.get(`http://${subdomain}`, {
+        timeout: 10000,
+        validateStatus: () => true,
+        maxRedirects: 3,
+      });
+
+      const body = String(response.data);
+
+      // Check against fingerprints
+      for (const fingerprint of TAKEOVER_FINGERPRINTS) {
+        if (fingerprint.pattern.test(body)) {
+          return {
+            subdomain,
+            vulnerable: true,
+            service: fingerprint.service,
+            evidence: `CNAME: ${cname} - Service returned takeover fingerprint`,
+          };
+        }
+      }
+    } catch (error: any) {
+      // Connection refused or DNS failure with existing CNAME = potential takeover
+      if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+        return {
+          subdomain,
+          vulnerable: true,
+          service: 'Unknown',
+          evidence: `CNAME: ${cname} - Target does not exist (dangling CNAME)`,
+        };
+      }
+    }
+
+    return null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Check multiple subdomains for takeover vulnerabilities
+ * @param subdomains - Array of subdomains to check
+ * @returns Array of vulnerable subdomains
+ */
+export async function checkSubdomainsTakeover(
+  subdomains: SubdomainInfo[]
+): Promise<SubdomainTakeoverResult[]> {
+  const results: SubdomainTakeoverResult[] = [];
+
+  // Only check subdomains that resolved (they might have dangling CNAMEs to external services)
+  const batchSize = 5;
+  for (let i = 0; i < subdomains.length; i += batchSize) {
+    const batch = subdomains.slice(i, i + batchSize);
+
+    const batchResults = await Promise.allSettled(
+      batch.map(s => checkSubdomainTakeover(s.name))
+    );
+
+    batchResults.forEach((result) => {
+      if (result.status === 'fulfilled' && result.value) {
+        results.push(result.value);
+      }
+    });
+
+    if (i + batchSize < subdomains.length) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Convert subdomain takeover results to vulnerabilities
+ */
+export function takeoverToVulnerabilities(
+  results: SubdomainTakeoverResult[],
+  lang: 'tr' | 'en'
+): any[] {
+  return results.filter(r => r.vulnerable).map((result, index) => ({
+    id: `VULN-TAKEOVER-${index + 1}`,
+    title: lang === 'tr'
+      ? `Subdomain Takeover Riski: ${result.subdomain}`
+      : `Subdomain Takeover Risk: ${result.subdomain}`,
+    description: lang === 'tr'
+      ? `${result.subdomain} subdomain'i takeover saldırısına açık. Servis: ${result.service}. ${result.evidence}`
+      : `${result.subdomain} is vulnerable to subdomain takeover. Service: ${result.service}. ${result.evidence}`,
+    severity: 'Kritik',
+    location: result.subdomain,
+    remediation: lang === 'tr'
+      ? 'CNAME kaydını kaldırın veya hedef servisi yeniden yapılandırın.'
+      : 'Remove the CNAME record or reconfigure the target service.',
+    cvssScore: 8.5,
+    exploitExample: `# Saldırgan ${result.service} üzerinde subdomain'i claim edebilir`,
+    exploitablePaths: [{
+      description: lang === 'tr' ? 'Subdomain Takeover' : 'Subdomain Takeover',
+      scenario: lang === 'tr'
+        ? 'Saldırgan bu subdomain üzerinde içerik yayınlayabilir'
+        : 'Attacker can publish content on this subdomain',
+      impact: lang === 'tr'
+        ? 'Phishing, malware dağıtımı, cookie çalma'
+        : 'Phishing, malware distribution, cookie theft',
+    }],
+    relatedCves: ['CWE-913'],
+  }));
 }

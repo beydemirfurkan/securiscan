@@ -13,6 +13,15 @@ export interface HeaderAnalysis {
   description: string;
 }
 
+export interface CookieAnalysis {
+  name: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: string | null;
+  issues: string[];
+  risk: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+}
+
 /**
  * Scan HTTP headers for security configuration
  * @param url - The URL to analyze
@@ -148,4 +157,146 @@ function validateHeaderValue(headerKey: string, value: string): boolean {
       // For other headers, just check if they exist
       return true;
   }
+}
+
+/**
+ * Analyze cookies for security flags
+ * @param url - The URL to analyze
+ * @returns Array of cookie analysis results
+ */
+export async function analyzeCookies(url: string): Promise<CookieAnalysis[]> {
+  const results: CookieAnalysis[] = [];
+
+  try {
+    const response = await axios.get(url, {
+      timeout: 10000,
+      validateStatus: () => true,
+      maxRedirects: 3,
+    });
+
+    // Get Set-Cookie headers
+    const setCookieHeaders = response.headers['set-cookie'];
+
+    if (!setCookieHeaders || !Array.isArray(setCookieHeaders)) {
+      return results;
+    }
+
+    for (const cookieHeader of setCookieHeaders) {
+      const analysis = parseCookie(cookieHeader);
+      results.push(analysis);
+    }
+  } catch (error) {
+    // Ignore errors
+  }
+
+  return results;
+}
+
+/**
+ * Parse a single Set-Cookie header and analyze security
+ */
+function parseCookie(cookieHeader: string): CookieAnalysis {
+  const parts = cookieHeader.split(';').map(p => p.trim());
+  const [nameValue] = parts;
+  const [name] = nameValue.split('=');
+
+  const lowerHeader = cookieHeader.toLowerCase();
+
+  const secure = lowerHeader.includes('secure');
+  const httpOnly = lowerHeader.includes('httponly');
+
+  let sameSite: string | null = null;
+  const sameSiteMatch = lowerHeader.match(/samesite\s*=\s*(strict|lax|none)/i);
+  if (sameSiteMatch) {
+    sameSite = sameSiteMatch[1].toLowerCase();
+  }
+
+  const issues: string[] = [];
+
+  // Check for session-like cookie names
+  const isSessionCookie = /session|token|auth|jwt|sid|id$/i.test(name);
+
+  if (!secure) {
+    issues.push('Missing Secure flag - cookie can be sent over HTTP');
+  }
+
+  if (!httpOnly && isSessionCookie) {
+    issues.push('Missing HttpOnly flag - cookie accessible via JavaScript (XSS risk)');
+  }
+
+  if (!sameSite) {
+    issues.push('Missing SameSite attribute - vulnerable to CSRF');
+  } else if (sameSite === 'none' && !secure) {
+    issues.push('SameSite=None requires Secure flag');
+  }
+
+  // Determine risk level
+  let risk: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE' = 'NONE';
+
+  if (isSessionCookie) {
+    if (!secure && !httpOnly) {
+      risk = 'HIGH';
+    } else if (!secure || !httpOnly) {
+      risk = 'MEDIUM';
+    } else if (!sameSite) {
+      risk = 'LOW';
+    }
+  } else {
+    if (!secure) {
+      risk = 'LOW';
+    }
+  }
+
+  return {
+    name,
+    secure,
+    httpOnly,
+    sameSite,
+    issues,
+    risk,
+  };
+}
+
+/**
+ * Convert cookie analysis to vulnerabilities
+ */
+export function cookiesToVulnerabilities(
+  cookies: CookieAnalysis[],
+  lang: 'tr' | 'en'
+): any[] {
+  const vulnerabilities: any[] = [];
+
+  const riskySessionCookies = cookies.filter(
+    c => c.risk === 'HIGH' || c.risk === 'MEDIUM'
+  );
+
+  if (riskySessionCookies.length > 0) {
+    const cookieNames = riskySessionCookies.map(c => c.name).join(', ');
+    const allIssues = riskySessionCookies.flatMap(c => c.issues);
+
+    vulnerabilities.push({
+      id: 'VULN-COOKIE-1',
+      title: lang === 'tr' ? 'Güvensiz Oturum Çerezleri' : 'Insecure Session Cookies',
+      description: lang === 'tr'
+        ? `Şu çerezlerde güvenlik sorunları tespit edildi: ${cookieNames}. Sorunlar: ${allIssues.join('; ')}`
+        : `Security issues found in cookies: ${cookieNames}. Issues: ${allIssues.join('; ')}`,
+      severity: riskySessionCookies.some(c => c.risk === 'HIGH') ? 'Yüksek' : 'Orta',
+      location: 'Set-Cookie Headers',
+      remediation: lang === 'tr'
+        ? 'Tüm oturum çerezlerine Secure, HttpOnly ve SameSite=Strict flaglerini ekleyin.'
+        : 'Add Secure, HttpOnly, and SameSite=Strict flags to all session cookies.',
+      cvssScore: riskySessionCookies.some(c => c.risk === 'HIGH') ? 7.0 : 5.0,
+      exploitExample: 'document.cookie // XSS ile çerez çalma',
+      exploitablePaths: [{
+        description: lang === 'tr' ? 'Session Hijacking' : 'Session Hijacking',
+        scenario: lang === 'tr'
+          ? 'XSS saldırısı ile oturum çerezi çalınabilir'
+          : 'Session cookie can be stolen via XSS attack',
+        impact: lang === 'tr' ? 'Hesap ele geçirme' : 'Account takeover',
+      }],
+      relatedCves: ['CWE-614', 'CWE-1004'],
+    });
+  }
+
+  return vulnerabilities;
 }
