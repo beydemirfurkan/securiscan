@@ -9,13 +9,21 @@ import { CLIENT_URL, NODE_ENV } from '../config/env';
 
 export const corsMiddleware = cors({
   origin: (origin, callback) => {
-    // Allow requests from the client URL
-    const allowedOrigins = [CLIENT_URL];
-
-    // In development, also allow requests without origin (like Postman, curl)
-    if (NODE_ENV === 'development' && !origin) {
-      return callback(null, true);
+    // In development, allow all localhost origins (Vite may use different ports)
+    if (NODE_ENV === 'development') {
+      // Allow requests without origin (like Postman, curl)
+      if (!origin) {
+        return callback(null, true);
+      }
+      
+      // Allow any localhost origin in development
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
     }
+
+    // Allow requests from the configured client URL
+    const allowedOrigins = [CLIENT_URL];
 
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
