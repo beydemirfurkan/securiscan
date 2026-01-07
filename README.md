@@ -8,12 +8,35 @@
 
 ## 🚀 Features
 
+### Core Scanning
 - **AI-Powered Analysis**: Leverages Google Gemini 3 Flash via OpenRouter for intelligent security scanning
 - **Real-time Terminal Interface**: Interactive terminal-style scanning experience
-- **Comprehensive Reports**: Detailed vulnerability reports with CVSS scoring, exploit chains, and remediation steps
 - **Multi-language Support**: Full Turkish and English localization
 - **Secure Architecture**: Backend API with SSRF protection, rate limiting, and security headers
-- **Modular Design**: Feature-based organization with kebab-case naming conventions
+
+### Security Scanners
+- **SSL/TLS Scanner**: Certificate validation, protocol analysis, and grade scoring
+- **Header Scanner**: Security header analysis (CSP, HSTS, X-Frame-Options, etc.)
+- **Port Scanner**: Open port detection with service identification
+- **Technology Detector**: Framework and library detection with version info
+- **DNS Scanner**: DNS record analysis and subdomain enumeration
+- **Cookie Analyzer**: Cookie security flags validation (HttpOnly, Secure, SameSite)
+
+### Advanced Vulnerability Detection
+- **CORS Misconfiguration**: Detects wildcard origins, credential leaks, and reflected origins
+- **Directory Traversal**: Tests path traversal patterns (../, ..%2f, etc.)
+- **Open Redirect**: Identifies URL parameters vulnerable to redirect attacks
+- **HTTP Methods**: Detects dangerous methods (PUT, DELETE, TRACE)
+- **Robots.txt Analysis**: Extracts sensitive paths and admin panels
+- **Security.txt Check**: Validates security contact information presence
+- **CVE Correlation**: Maps detected technologies to known vulnerabilities
+
+### Reporting & Export
+- **PDF Reports**: Professional reports with executive summary, vulnerability tables, and action plans
+- **JSON Export**: Machine-readable format for automation and integration
+- **CVSS Scoring**: Industry-standard vulnerability severity ratings
+- **Remediation Steps**: Actionable fix recommendations for each finding
+- **Compliance Checks**: OWASP, PCI-DSS, and GDPR compliance status
 
 ## 🏗️ Architecture
 
@@ -21,12 +44,15 @@
 - **Server**: Express on port 3001
 - **API Integration**: OpenRouter (Google Gemini Flash model)
 - **Security**: Helmet, CORS, rate limiting (10 req/15min), SSRF protection
+- **Scanners**: Modular scanner architecture with 15+ security modules
 - **Mock Mode**: Development mode with sample data when API key not configured
 
 ### Frontend (React + Vite)
 - **Framework**: React 19 with TypeScript
 - **Build Tool**: Vite with hot module replacement
 - **Styling**: Tailwind CSS with custom cyber theme
+- **Charts**: Recharts for vulnerability distribution visualization
+- **PDF Generation**: jsPDF with auto-table for report export
 - **State Management**: Custom hooks pattern
 - **i18n**: Centralized translation management
 
@@ -37,9 +63,22 @@ securiscan-ai/
 ├── server/                          # Express backend
 │   ├── config/                      # Environment configuration
 │   ├── middleware/                  # CORS, rate limiting, error handling
-│   ├── services/                    # OpenRouter API integration
+│   ├── services/                    # OpenRouter, GeoIP, WHOIS services
 │   ├── routes/                      # API endpoints
-│   └── utils/                       # URL validator (SSRF protection)
+│   ├── scanners/                    # Security scanner modules
+│   │   ├── ssl-scanner.ts           # SSL/TLS analysis
+│   │   ├── header-scanner.ts        # HTTP header analysis
+│   │   ├── port-scanner.ts          # Port scanning
+│   │   ├── dns-scanner.ts           # DNS enumeration
+│   │   ├── tech-detector.ts         # Technology detection
+│   │   ├── active-scanner.ts        # CORS, XSS, SQLi, traversal tests
+│   │   ├── http-methods-scanner.ts  # HTTP method testing
+│   │   ├── robots-scanner.ts        # Robots.txt & security.txt
+│   │   ├── cve-correlator.ts        # CVE database correlation
+│   │   ├── vulnerability-detector.ts # Vulnerability aggregation
+│   │   ├── scoring-engine.ts        # Security score calculation
+│   │   └── action-plan-generator.ts # Remediation planning
+│   └── utils/                       # URL validator, constants
 │
 └── src/                             # React frontend
     ├── config/                      # App constants and API endpoints
@@ -48,10 +87,12 @@ securiscan-ai/
     ├── lib/                         # API client and utilities
     ├── hooks/                       # Custom React hooks
     ├── services/                    # Backend API calls
+    │   ├── pdf-generator.service.ts # PDF report generation
+    │   └── report-exporter.service.ts # Export orchestration
     ├── features/                    # Feature-based components
     │   ├── scanner/                 # Scan terminal and input
     │   ├── report/                  # Dashboard and vulnerability cards
-    │   └── paywall/                 # Payment overlay (structure only)
+    │   └── paywall/                 # Premium features overlay
     └── components/                  # Shared UI components
 ```
 
@@ -65,8 +106,8 @@ securiscan-ai/
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
-   cd securiscan-ai
+   git clone https://github.com/beydemirfurkan/securiscan.git
+   cd securiscan
    ```
 
 2. **Install dependencies**
@@ -121,11 +162,30 @@ securiscan-ai/
 - **CORS**: Configured for localhost development
 - **Input Validation**: Server-side URL validation
 
-### Code Security
-- No environment variables in client bundle
-- Secure API communication via proxy
-- TypeScript for type safety
-- Modular architecture for maintainability
+### Scanning Capabilities
+| Scanner | Description | Severity Range |
+|---------|-------------|----------------|
+| SSL/TLS | Certificate and protocol analysis | INFO - CRITICAL |
+| Headers | Security header validation | LOW - HIGH |
+| CORS | Cross-origin misconfiguration | MEDIUM - CRITICAL |
+| Directory Traversal | Path traversal vulnerabilities | CRITICAL |
+| Open Redirect | URL redirect vulnerabilities | MEDIUM |
+| HTTP Methods | Dangerous method detection | MEDIUM - HIGH |
+| CVE Correlation | Known vulnerability mapping | LOW - CRITICAL |
+
+## 🧪 Testing
+
+Run the test suite:
+```bash
+npm test
+```
+
+The project includes 79+ tests covering:
+- HTTP Methods Scanner (property-based tests)
+- Active Scanner (CORS, traversal, redirect)
+- CVE Correlator (version matching, sorting)
+- Robots Scanner (parsing, sensitive path detection)
+- Report Exporter (JSON round-trip, filename generation)
 
 ## 📦 Build & Deployment
 
@@ -157,6 +217,7 @@ This creates:
 | `npm run dev:server` | Run backend only (Express server) |
 | `npm run build` | Build both client and server for production |
 | `npm run build:server` | Build server only (TypeScript compilation) |
+| `npm test` | Run test suite with Vitest |
 
 ## 🧩 Technology Stack
 
@@ -165,16 +226,22 @@ This creates:
 - **TypeScript** - Type safety
 - **Vite** - Build tool and dev server
 - **Tailwind CSS** - Utility-first CSS
+- **Recharts** - Data visualization
+- **jsPDF** - PDF generation
 - **Lucide React** - Icon library
 - **Axios** - HTTP client
 
 ### Backend
 - **Express.js** - Web framework
 - **TypeScript** - Type safety
-- **Axios** - OpenRouter API client
+- **Axios** - HTTP client for scanning
 - **Helmet** - Security headers
 - **CORS** - Cross-origin configuration
 - **Express Rate Limit** - Rate limiting
+
+### Testing
+- **Vitest** - Test runner
+- **fast-check** - Property-based testing
 
 ## 📝 Development Notes
 
@@ -184,12 +251,11 @@ When `OPENROUTER_API_KEY=PLACEHOLDER_API_KEY` in `.env.local`, the app runs in m
 - UI testing
 - Demo purposes
 
-### OpenRouter Integration
-The app uses **google/gemini-flash-1.5-8b** model via OpenRouter. To use a different model, edit:
-```typescript
-// server/services/openrouter.service.ts
-model: 'your-preferred-model'
-```
+### Adding New Scanners
+1. Create scanner module in `server/scanners/`
+2. Export scan function and vulnerability converter
+3. Import and integrate in `server/scanners/index.ts`
+4. Add tests in `server/scanners/*.test.ts`
 
 ### Adding New Languages
 1. Create new locale file: `src/i18n/locales/{lang}.ts`
@@ -224,8 +290,9 @@ Contributions are welcome! Please ensure:
 - TypeScript types for all code
 - Security best practices
 - Modular component structure
+- Tests for new scanners
 
 ---
 
-**SECURISCAN ENGINE v4.0.2 // STABLE RELEASE**
+**SECURISCAN ENGINE v4.1.0 // ENHANCED SECURITY RELEASE**
 © 2025 GLOBAL DEFENSE SYSTEMS
