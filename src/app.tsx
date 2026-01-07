@@ -30,11 +30,15 @@ const App: React.FC = () => {
   } = useScan(lang);
 
   // Re-fetch report when language changes to localize content
+  // Using a ref to track previous language to avoid infinite loops
+  const prevLangRef = React.useRef(lang);
   useEffect(() => {
-    if (report && status === 'COMPLETE') {
+    // Only refetch if language actually changed (not on initial render or report change)
+    if (prevLangRef.current !== lang && report && status === 'COMPLETE') {
       refetchReport(report.targetUrl);
     }
-  }, [lang, report, status, refetchReport]);
+    prevLangRef.current = lang;
+  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const startScanProcess = (e: React.FormEvent) => {

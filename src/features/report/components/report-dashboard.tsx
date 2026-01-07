@@ -292,6 +292,33 @@ const ReportDashboard: React.FC<Props> = ({ report, onReset, lang }) => {
         </div>
       </section>
 
+      {/* Infrastructure Warnings Section */}
+      {report.warnings && report.warnings.length > 0 && (
+        <section className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 rounded-2xl p-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 blur-[60px] pointer-events-none"></div>
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-amber-500/20 p-2 rounded-lg">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+              </div>
+              <h3 className="text-amber-400 font-bold text-lg">
+                {lang === 'tr' ? 'Altyapı Uyarıları' : 'Infrastructure Warnings'}
+              </h3>
+            </div>
+            <div className="space-y-3">
+              {report.warnings.map((warning, index) => (
+                <div key={index} className="bg-black/30 border border-amber-500/20 rounded-xl p-4">
+                  <p className="text-amber-200 text-sm font-medium mb-2">{warning.message}</p>
+                  {warning.details && (
+                    <p className="text-amber-400/70 text-xs">{warning.details}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* 1. SECTION: DETAYLI RİSK ANALİZİ */}
       <section className="space-y-6">
         <h3 className="text-cyber-green font-mono text-xs uppercase tracking-[0.3em] border-l-2 border-cyber-green pl-3 mb-6">

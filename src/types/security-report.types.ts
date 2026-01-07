@@ -137,4 +137,10 @@ export interface SecurityReport {
     hasSecurityTxt: boolean;
   };
   cveCorrelations?: CVECorrelationResult[];
+  // Warnings for inconsistencies detected during scan
+  warnings?: Array<{
+    type: 'infrastructure' | 'configuration' | 'data';
+    message: string;
+    details?: string;
+  }>;
 }

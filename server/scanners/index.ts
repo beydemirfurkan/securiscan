@@ -82,6 +82,12 @@ export interface SecurityReport {
     hasSecurityTxt: boolean;
   };
   cveCorrelations?: CVECorrelationResult[];
+  // Warnings for inconsistencies detected during scan
+  warnings?: Array<{
+    type: 'infrastructure' | 'configuration' | 'data';
+    message: string;
+    details?: string;
+  }>;
 }
 
 /**
@@ -416,6 +422,62 @@ export async function performSecurityScan(
   // Generate summary
   const summary = generateSummary(scoreBreakdown.total, uniqueVulns.length, lang);
 
+  // Check for infrastructure inconsistencies
+  const warnings: Array<{ type: 'infrastructure' | 'configuration' | 'data'; message: string; details?: string }> = [];
+  
+  // Check server type vs ISP/port inconsistency
+  const serverType = headersRecord['server'] || '';
+  const serverTypeLower = serverType.toLowerCase();
+  const isp = geoipInfo?.isp || '';
+  const ispLower = isp.toLowerCase();
+  
+  // Known serverless/CDN providers that shouldn't have database ports open
+  const serverlessProviders = ['vercel', 'netlify', 'cloudflare', 'aws lambda', 'azure functions', 'firebase'];
+  const isServerless = serverlessProviders.some(p => serverTypeLower.includes(p));
+  
+  // Database and dangerous ports that shouldn't be open on serverless
+  const databasePorts = [3306, 5432, 27017, 6379, 1433, 11211];
+  const dangerousPorts = [21, 22, 23, 3389, 5900];
+  const openDatabasePorts = openPorts.filter(p => databasePorts.includes(p));
+  const openDangerousPorts = openPorts.filter(p => dangerousPorts.includes(p));
+  
+  if (isServerless && (openDatabasePorts.length > 0 || openDangerousPorts.length > 0)) {
+    warnings.push({
+      type: 'infrastructure',
+      message: lang === 'tr' 
+        ? `Altyapı Tutarsızlığı: HTTP başlıklarında "${serverType}" tespit edildi ancak IP adresinde (${network.ip}) veritabanı/servis portları açık.`
+        : `Infrastructure Inconsistency: "${serverType}" detected in HTTP headers but database/service ports are open on IP (${network.ip}).`,
+      details: lang === 'tr'
+        ? `Bu durum DNS yanlış yapılandırması, proxy/CDN kullanımı veya farklı bir sunucuya yönlendirme olduğunu gösterebilir. Açık portlar: ${[...openDatabasePorts, ...openDangerousPorts].join(', ')}`
+        : `This may indicate DNS misconfiguration, proxy/CDN usage, or redirection to a different server. Open ports: ${[...openDatabasePorts, ...openDangerousPorts].join(', ')}`
+    });
+  }
+  
+  // Check if ISP doesn't match expected cloud provider
+  const cloudProviders: Record<string, string[]> = {
+    'vercel': ['amazon', 'aws', 'google', 'gcp', 'cloudflare'],
+    'netlify': ['amazon', 'aws', 'google', 'gcp', 'cloudflare'],
+    'cloudflare': ['cloudflare'],
+  };
+  
+  for (const [provider, expectedIsps] of Object.entries(cloudProviders)) {
+    if (serverTypeLower.includes(provider)) {
+      const matchesExpected = expectedIsps.some(exp => ispLower.includes(exp));
+      if (!matchesExpected && isp && isp !== 'Unknown') {
+        warnings.push({
+          type: 'infrastructure',
+          message: lang === 'tr'
+            ? `ISP Uyuşmazlığı: Sunucu "${serverType}" olarak tespit edildi ancak ISP "${isp}" beklenenden farklı.`
+            : `ISP Mismatch: Server detected as "${serverType}" but ISP "${isp}" differs from expected.`,
+          details: lang === 'tr'
+            ? 'Bu durum DNS yapılandırma hatası veya proxy kullanımı olabilir.'
+            : 'This may indicate DNS misconfiguration or proxy usage.'
+        });
+        break;
+      }
+    }
+  }
+
   // Assemble final report
   const report: SecurityReport = {
     targetUrl: url,
@@ -457,6 +519,7 @@ export async function performSecurityScan(
       hasSecurityTxt: robotsResult.securityTxt.exists,
     },
     cveCorrelations,
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 
   console.log(`[SecurityScan] Scan complete for ${url}`);

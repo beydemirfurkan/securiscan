@@ -268,6 +268,17 @@ const TRAVERSAL_PARAMS = [
 
 // ==================== MAIN SCANNER ====================
 
+// Timeout wrapper for individual scans
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, defaultValue: T, scanName: string): Promise<T> {
+  const timeoutPromise = new Promise<T>((resolve) => {
+    setTimeout(() => {
+      console.log(`[ActiveScanner] ${scanName} timed out after ${timeoutMs}ms`);
+      resolve(defaultValue);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]);
+}
+
 /**
  * Perform active security scan
  * @param url - Target URL to scan
@@ -281,15 +292,18 @@ export async function performActiveScan(
   console.log(`[ActiveScanner] Starting active scan for ${url}`);
 
   const baseUrl = new URL(url).origin;
+  
+  // Individual scan timeout (15 seconds each)
+  const SCAN_TIMEOUT = 15000;
 
-  // Run all scans in parallel for speed
+  // Run all scans in parallel with individual timeouts
   const [sensitiveFiles, sqlInjection, xss, openRedirect, cors, directoryTraversal] = await Promise.all([
-    scanSensitiveFiles(baseUrl),
-    scanForSqlInjection(url),
-    scanForXss(url),
-    scanForOpenRedirect(url),
-    scanForCorsMisconfiguration(url),
-    scanForDirectoryTraversal(url),
+    withTimeout(scanSensitiveFiles(baseUrl), SCAN_TIMEOUT, [], 'sensitiveFiles'),
+    withTimeout(scanForSqlInjection(url), SCAN_TIMEOUT, [], 'sqlInjection'),
+    withTimeout(scanForXss(url), SCAN_TIMEOUT, [], 'xss'),
+    withTimeout(scanForOpenRedirect(url), SCAN_TIMEOUT, [], 'openRedirect'),
+    withTimeout(scanForCorsMisconfiguration(url), SCAN_TIMEOUT, null, 'cors'),
+    withTimeout(scanForDirectoryTraversal(url), SCAN_TIMEOUT, [], 'directoryTraversal'),
   ]);
 
   console.log(`[ActiveScanner] Scan complete - Found ${sensitiveFiles.filter(f => f.accessible).length} accessible files, ${sqlInjection.filter(s => s.detected).length} SQLi, ${xss.filter(x => x.reflected).length} XSS, ${directoryTraversal.filter(d => d.vulnerable).length} Dir Traversal`);
@@ -562,57 +576,77 @@ export function generateExploitUrl(baseUrl: string, parameter: string, payload: 
 
 /**
  * Scan for open redirect vulnerabilities with enhanced detection
+ * Optimized: Reduced combinations and parallel execution
  */
 async function scanForOpenRedirect(url: string): Promise<OpenRedirectResult[]> {
   const results: OpenRedirectResult[] = [];
   const parsedUrl = new URL(url);
   const existingParams = Array.from(new URLSearchParams(parsedUrl.search).keys());
   
-  // Test existing parameters first, then common redirect parameters
+  // Test existing parameters first, then common redirect parameters (limit to 8)
   const paramsToTest = [
     ...existingParams.filter(p => REDIRECT_PARAMS.includes(p.toLowerCase())),
-    ...REDIRECT_PARAMS.slice(0, 20), // Limit to avoid too many requests
+    ...REDIRECT_PARAMS.slice(0, 8),
   ];
   
-  // Remove duplicates
-  const uniqueParams = [...new Set(paramsToTest)];
+  // Remove duplicates and limit
+  const uniqueParams = [...new Set(paramsToTest)].slice(0, 8);
+  
+  // Use only the most effective payloads
+  const effectivePayloads = REDIRECT_PAYLOADS.slice(0, 3);
 
-  for (const param of uniqueParams.slice(0, 15)) {
-    for (const { payload, type } of REDIRECT_PAYLOADS) {
+  // Build test cases
+  const testCases: Array<{ param: string; payload: string; type: string; testUrl: string }> = [];
+  for (const param of uniqueParams) {
+    for (const { payload, type } of effectivePayloads) {
       const testUrl = new URL(url);
       testUrl.searchParams.set(param, payload);
+      testCases.push({ param, payload, type, testUrl: testUrl.toString() });
+    }
+  }
 
-      try {
-        const response = await axios.get(testUrl.toString(), {
-          timeout: 5000,
-          validateStatus: () => true,
-          maxRedirects: 0, // Don't follow redirects
-        });
+  // Execute in batches of 5
+  const batchSize = 5;
+  for (let i = 0; i < testCases.length; i += batchSize) {
+    const batch = testCases.slice(i, i + batchSize);
+    
+    const batchResults = await Promise.all(
+      batch.map(async ({ param, payload, type, testUrl }) => {
+        try {
+          const response = await axios.get(testUrl, {
+            timeout: 3000,
+            validateStatus: () => true,
+            maxRedirects: 0,
+          });
 
-        const locationHeader = response.headers['location'];
-        const statusCode = response.status;
+          const locationHeader = response.headers['location'];
+          const statusCode = response.status;
 
-        // Check for redirect status codes (3xx)
-        if (statusCode >= 300 && statusCode < 400 && locationHeader) {
-          // Check if the redirect goes to an external domain
-          if (isExternalRedirect(locationHeader, parsedUrl.hostname)) {
-            const exploitUrl = generateExploitUrl(url, param, payload);
-            
-            results.push({
-              parameter: param,
-              vulnerable: true,
-              redirectedTo: locationHeader,
-              exploitUrl,
-              severity: 'MEDIUM',
-              payload,
-            });
-            
-            // Found vulnerability for this param, move to next param
-            break;
+          if (statusCode >= 300 && statusCode < 400 && locationHeader) {
+            if (isExternalRedirect(locationHeader, parsedUrl.hostname)) {
+              return {
+                parameter: param,
+                vulnerable: true,
+                redirectedTo: locationHeader,
+                exploitUrl: generateExploitUrl(url, param, payload),
+                severity: 'MEDIUM' as const,
+                payload,
+              };
+            }
           }
+        } catch (error) {
+          // Ignore errors
         }
-      } catch (error) {
-        // Ignore errors
+        return null;
+      })
+    );
+
+    // Add found vulnerabilities
+    for (const result of batchResults) {
+      if (result) {
+        results.push(result);
+        // Found vulnerability, return early
+        return results;
       }
     }
   }
@@ -811,52 +845,63 @@ async function scanForCorsMisconfiguration(url: string): Promise<CorsResult | nu
 /**
  * Scan for directory traversal vulnerabilities
  * Tests various encoding patterns against common sensitive files
+ * Optimized: Reduced combinations and parallel execution
  */
 async function scanForDirectoryTraversal(url: string): Promise<DirectoryTraversalResult[]> {
   const results: DirectoryTraversalResult[] = [];
   const parsedUrl = new URL(url);
   const params = new URLSearchParams(parsedUrl.search);
 
-  // Determine which parameters to test
+  // Determine which parameters to test (limit to 3)
   const paramsToTest = params.toString() !== ''
-    ? Array.from(params.keys())
-    : TRAVERSAL_PARAMS.slice(0, 5); // Test common params if none exist
+    ? Array.from(params.keys()).slice(0, 3)
+    : TRAVERSAL_PARAMS.slice(0, 3); // Test only 3 common params
 
-  // Test each parameter with traversal patterns
-  for (const param of paramsToTest.slice(0, 5)) {
-    for (const targetFile of TRAVERSAL_TARGET_FILES) {
-      for (const pattern of TRAVERSAL_PATTERNS.slice(0, 8)) {
-        // Build traversal payload with multiple depth levels
-        const depths = [3, 5, 7, 10];
-        
-        for (const depth of depths) {
+  // Use only the most effective patterns and depths
+  const effectivePatterns = ['../', '..%2f', '....//'];
+  const effectiveDepths = [5, 8];
+  // Only test the most common target files
+  const priorityTargetFiles = TRAVERSAL_TARGET_FILES.slice(0, 3);
+
+  // Build all test cases first
+  const testCases: Array<{
+    param: string;
+    testUrl: string;
+    traversalPath: string;
+    targetFile: typeof TRAVERSAL_TARGET_FILES[0];
+  }> = [];
+
+  for (const param of paramsToTest) {
+    for (const targetFile of priorityTargetFiles) {
+      for (const pattern of effectivePatterns) {
+        for (const depth of effectiveDepths) {
           const traversalPath = pattern.repeat(depth) + targetFile.path.replace(/^[A-Z]:\\/, '').replace(/\\/g, '/');
           const testUrl = new URL(url);
           testUrl.searchParams.set(param, traversalPath);
-
-          const result = await testDirectoryTraversal(
-            testUrl.toString(),
-            param,
-            traversalPath,
-            targetFile
-          );
-
-          if (result.vulnerable) {
-            results.push(result);
-            // Found vulnerability for this param, move to next param
-            break;
-          }
-        }
-
-        // If we found a vulnerability, stop testing this param
-        if (results.some(r => r.parameter === param && r.vulnerable)) {
-          break;
+          testCases.push({ param, testUrl: testUrl.toString(), traversalPath, targetFile });
         }
       }
+    }
+  }
 
-      // If we found a vulnerability, stop testing this param
-      if (results.some(r => r.parameter === param && r.vulnerable)) {
-        break;
+  // Execute tests in batches of 5 for better performance
+  const batchSize = 5;
+  for (let i = 0; i < testCases.length; i += batchSize) {
+    const batch = testCases.slice(i, i + batchSize);
+    
+    const batchResults = await Promise.all(
+      batch.map(async ({ param, testUrl, traversalPath, targetFile }) => {
+        const result = await testDirectoryTraversal(testUrl, param, traversalPath, targetFile);
+        return { ...result, param };
+      })
+    );
+
+    // Check for vulnerabilities
+    for (const result of batchResults) {
+      if (result.vulnerable) {
+        results.push(result);
+        // Found vulnerability, we can return early
+        return results;
       }
     }
   }
