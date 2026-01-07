@@ -322,7 +322,7 @@ export async function scanRobots(
   // Fetch robots.txt
   try {
     const robotsResponse = await axios.get(`${origin}/robots.txt`, {
-      timeout: 10000,
+      timeout: 5000,
       validateStatus: (status) => status < 500,
       maxRedirects: 3,
       headers: {
@@ -361,7 +361,7 @@ export async function scanRobots(
   for (const secPath of securityTxtPaths) {
     try {
       const securityResponse = await axios.get(`${origin}${secPath}`, {
-        timeout: 10000,
+        timeout: 5000,
         validateStatus: (status) => status < 500,
         maxRedirects: 3,
         headers: {

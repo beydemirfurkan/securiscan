@@ -110,7 +110,7 @@ export async function scanHttpMethods(
   try {
     // First, try OPTIONS request to get allowed methods
     const optionsResponse = await axios.options(url, {
-      timeout: 10000,
+      timeout: 5000,
       validateStatus: () => true,
       maxRedirects: 3,
     });

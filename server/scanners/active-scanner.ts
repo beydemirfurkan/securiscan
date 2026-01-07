@@ -419,7 +419,7 @@ async function testSqlInjection(
 ): Promise<SqlInjectionResult> {
   try {
     const response = await axios.get(testUrl, {
-      timeout: 10000,
+      timeout: 5000,
       validateStatus: () => true,
       maxRedirects: 3,
     });
@@ -481,7 +481,7 @@ async function scanForXss(url: string): Promise<XssResult[]> {
 
       try {
         const response = await axios.get(testUrl.toString(), {
-          timeout: 10000,
+          timeout: 5000,
           validateStatus: () => true,
           maxRedirects: 3,
         });
@@ -584,7 +584,7 @@ async function scanForOpenRedirect(url: string): Promise<OpenRedirectResult[]> {
 
       try {
         const response = await axios.get(testUrl.toString(), {
-          timeout: 10000,
+          timeout: 5000,
           validateStatus: () => true,
           maxRedirects: 0, // Don't follow redirects
         });
@@ -729,7 +729,7 @@ async function scanForCorsMisconfiguration(url: string): Promise<CorsResult | nu
     
     try {
       const response = await axios.get(url, {
-        timeout: 10000,
+        timeout: 5000,
         validateStatus: () => true,
         headers: {
           'Origin': testOrigin.origin,
@@ -875,7 +875,7 @@ async function testDirectoryTraversal(
 ): Promise<DirectoryTraversalResult> {
   try {
     const response = await axios.get(testUrl, {
-      timeout: 10000,
+      timeout: 5000,
       validateStatus: () => true,
       maxRedirects: 3,
     });

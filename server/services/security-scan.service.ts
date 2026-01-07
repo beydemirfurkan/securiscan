@@ -19,10 +19,10 @@ export async function analyzeUrlWithRealScan(
   try {
     console.log(`[SecurityScanService] Starting scan for ${url}`);
 
-    // Create 60 second timeout
+    // Create 120 second timeout (increased for comprehensive scanning)
     const scanPromise = performSecurityScan(url, isPremium, lang);
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Scan timeout after 60 seconds')), 60000)
+      setTimeout(() => reject(new Error('Scan timeout after 120 seconds')), 120000)
     );
 
     const report = await Promise.race([scanPromise, timeoutPromise]);
