@@ -22,3 +22,6 @@ export const PAYMENT_CONFIG = {
     en: '$29'
   }
 } as const;
+
+// API Base URL for SSE connections
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';

@@ -13,6 +13,11 @@ interface ScanRequest {
   paymentToken?: string;
 }
 
+interface ScanStartResponse {
+  scanId: string;
+  status: 'started';
+}
+
 /**
  * Analyze a URL and get security report
  *
@@ -25,14 +30,38 @@ export async function analyzeUrl(
   url: string,
   lang: 'tr' | 'en' = 'tr',
   paymentToken?: string
-): Promise<SecurityReport> {
+): Promise<SecurityReport & { scanId?: string }> {
   const requestData: ScanRequest = {
     url,
     lang,
     ...(paymentToken && { paymentToken })
   };
 
-  const response = await apiClient.post<SecurityReport>('/scan', requestData);
+  const response = await apiClient.post<SecurityReport & { scanId?: string }>('/scan', requestData);
+
+  return response.data;
+}
+
+/**
+ * Start a scan and get scanId for progress tracking
+ *
+ * @param url - The URL to scan
+ * @param lang - Language for the report (tr or en)
+ * @param paymentToken - Optional payment token for premium features
+ * @returns Scan ID for progress tracking
+ */
+export async function startScanWithProgress(
+  url: string,
+  lang: 'tr' | 'en' = 'tr',
+  paymentToken?: string
+): Promise<ScanStartResponse> {
+  const requestData: ScanRequest = {
+    url,
+    lang,
+    ...(paymentToken && { paymentToken })
+  };
+
+  const response = await apiClient.post<ScanStartResponse>('/scan/start', requestData);
 
   return response.data;
 }

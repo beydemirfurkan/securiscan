@@ -1,11 +1,11 @@
 /**
  * useScan Hook
  *
- * Manages security scan state and operations
+ * Manages security scan state and operations with real-time progress
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { analyzeUrl } from '../services/scan.service';
+import { analyzeUrl, startScanWithProgress } from '../services/scan.service';
 import type { SecurityReport, ScanStatus } from '../types';
 
 export function useScan(lang: 'tr' | 'en') {
@@ -15,6 +15,7 @@ export function useScan(lang: 'tr' | 'en') {
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isTerminalReady, setIsTerminalReady] = useState(false);
+  const [scanId, setScanId] = useState<string | null>(null);
 
   // When terminal completes and report is ready, transition to COMPLETE
   useEffect(() => {
@@ -60,9 +61,14 @@ export function useScan(lang: 'tr' | 'en') {
       setReport(null);
       setIsTerminalReady(false);
       setValidationError(null);
+      setScanId(null);
 
+      // Use the standard scan endpoint which returns report directly
       analyzeUrl(formattedUrl, lang)
         .then(result => {
+          if (result.scanId) {
+            setScanId(result.scanId);
+          }
           setReport(result);
         })
         .catch(err => {
@@ -83,6 +89,7 @@ export function useScan(lang: 'tr' | 'en') {
     setError(null);
     setValidationError(null);
     setIsTerminalReady(false);
+    setScanId(null);
   }, []);
 
   const clearValidationError = useCallback(() => {
@@ -103,6 +110,7 @@ export function useScan(lang: 'tr' | 'en') {
     error,
     validationError,
     isTerminalReady,
+    scanId,
     startScan,
     reset,
     handleTerminalComplete,

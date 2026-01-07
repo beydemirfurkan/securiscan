@@ -27,6 +27,7 @@ import { scanRobots, robotsToVulnerabilities, RobotsScanResult } from './robots-
 import { correlateCVEs, cveCorrelationsToVulnerabilities, CVECorrelationResult } from './cve-correlator';
 import { getGeoIP, formatLocation } from '../services/geoip.service';
 import { getWhoisInfo, getDaysUntilExpiration } from '../services/whois.service';
+import { ScanProgressEmitter } from '../services/scan-progress.service';
 
 export interface SecurityReport {
   targetUrl: string;
@@ -88,13 +89,22 @@ export interface SecurityReport {
  * @param url - Target URL to scan
  * @param isPremium - Whether user has premium access
  * @param lang - Language for report (tr/en)
+ * @param progressEmitter - Optional progress emitter for real-time updates
  */
 export async function performSecurityScan(
   url: string,
   isPremium: boolean,
-  lang: 'tr' | 'en'
+  lang: 'tr' | 'en',
+  progressEmitter?: ScanProgressEmitter
 ): Promise<SecurityReport> {
+  const emit = (phase: string, progress: number, type: 'info' | 'success' | 'warning' | 'error' | 'neutral' = 'info', details?: string) => {
+    if (progressEmitter) {
+      progressEmitter.emitProgress(phase as any, progress, type, details);
+    }
+  };
+
   console.log(`[SecurityScan] Starting scan for ${url} (Premium: ${isPremium}, Lang: ${lang})`);
+  emit('connecting', 0, 'info');
 
   const parsedUrl = new URL(url);
   const hostname = parsedUrl.hostname;
@@ -102,6 +112,11 @@ export async function performSecurityScan(
 
   // Phase 1: Parallel basic scans (SSL, Headers, DNS, Cookies)
   console.log('[SecurityScan] Phase 1: Basic scans (SSL, Headers, DNS, Cookies)');
+  emit('dns', 5, 'info');
+  emit('ssl', 6, 'info');
+  emit('headers', 7, 'info');
+  emit('cookies', 8, 'info');
+  
   const [sslResult, headersResult, dnsResult, cookiesResult] = await Promise.allSettled([
     scanSSL(hostname, port),
     scanHeaders(url),
@@ -126,21 +141,32 @@ export async function performSecurityScan(
     : { ip: 'Unknown' };
 
   console.log(`[SecurityScan] Phase 1 complete - SSL: ${ssl.grade}, Headers: ${headers.length}, Cookies: ${cookies.length}, IP: ${network.ip}`);
+  emit('dns_complete', 10, 'success', `IP: ${network.ip}`);
+  emit('ssl_complete', 12, 'success', `Grade: ${ssl.grade}`);
+  emit('headers_complete', 14, 'success', `${headers.length} header`);
 
   // Phase 2: Port scanning (use IP from DNS)
   console.log('[SecurityScan] Phase 2: Port scanning');
+  emit('ports', 15, 'info');
+  
   let openPorts: number[] = [];
   if (network.ip !== 'Unknown') {
     try {
       openPorts = await scanPorts(network.ip);
       console.log(`[SecurityScan] Phase 2 complete - Open ports: ${openPorts.length}`);
+      emit('ports_complete', 25, 'success', `${openPorts.length} açık port`);
     } catch (error) {
       console.error('[SecurityScan] Port scan failed:', error);
+      emit('ports_complete', 25, 'warning', 'Port taraması başarısız');
     }
+  } else {
+    emit('ports_complete', 25, 'neutral', 'IP çözümlenemedi');
   }
 
   // Phase 3: Technology detection
   console.log('[SecurityScan] Phase 3: Technology detection');
+  emit('tech', 26, 'info');
+  
   const headersRecord: Record<string, string> = {};
   headers.forEach(h => {
     headersRecord[h.key.toLowerCase()] = h.value;
@@ -150,12 +176,16 @@ export async function performSecurityScan(
   try {
     techStack = await detectTechStack(url, headersRecord);
     console.log(`[SecurityScan] Phase 3 complete - Technologies: ${techStack.length}`);
+    emit('tech_complete', 30, 'success', `${techStack.length} teknoloji`);
   } catch (error) {
     console.error('[SecurityScan] Tech detection failed:', error);
+    emit('tech_complete', 30, 'warning', 'Teknoloji tespiti başarısız');
   }
 
   // Phase 3b: CVE Correlation for detected technologies
   console.log('[SecurityScan] Phase 3b: CVE Correlation');
+  emit('cve', 31, 'info');
+  
   let cveCorrelations: CVECorrelationResult[] = [];
   let cveVulns: Vulnerability[] = [];
   try {
@@ -185,12 +215,16 @@ export async function performSecurityScan(
       relatedCves: [{ name: cve.cveId, url: cve.nvdUrl }],
     }));
     console.log(`[SecurityScan] Phase 3b complete - CVE correlations: ${cveCorrelations.length}, CVE vulns: ${cveVulns.length}`);
+    emit('cve_complete', 35, cveVulns.length > 0 ? 'warning' : 'success', `${cveVulns.length} CVE`);
   } catch (error) {
     console.error('[SecurityScan] CVE correlation failed:', error);
+    emit('cve_complete', 35, 'neutral', 'CVE korelasyonu tamamlandı');
   }
 
   // Phase 4: Enhanced Subdomain scanning with crt.sh (premium only)
   console.log('[SecurityScan] Phase 4: Enhanced Subdomain scanning with crt.sh (Premium only)');
+  emit('subdomains', 36, 'info');
+  
   let subdomains: SubdomainInfo[] = [];
   let takeoverVulns: Vulnerability[] = [];
   if (isPremium) {
@@ -204,32 +238,45 @@ export async function performSecurityScan(
       const takeoverResults = await checkSubdomainsTakeover(subdomains.slice(0, 20)); // Limit to first 20
       takeoverVulns = takeoverToVulnerabilities(takeoverResults, lang);
       console.log(`[SecurityScan] Phase 4b complete - Takeover risks: ${takeoverVulns.length}`);
+      emit('subdomains_complete', 42, 'success', `${subdomains.length} alt alan adı`);
     } catch (error) {
       console.error('[SecurityScan] Subdomain scan failed:', error);
+      emit('subdomains_complete', 42, 'warning', 'Alt alan adı taraması başarısız');
     }
   } else {
     // Basic subdomain scan for free users
     try {
       subdomains = await scanSubdomains(hostname);
       console.log(`[SecurityScan] Phase 4 complete (basic) - Subdomains: ${subdomains.length}`);
+      emit('subdomains_complete', 42, 'success', `${subdomains.length} alt alan adı`);
     } catch (error) {
       console.error('[SecurityScan] Subdomain scan failed:', error);
+      emit('subdomains_complete', 42, 'neutral', 'Alt alan adı taraması tamamlandı');
     }
   }
 
   // Phase 5: Content security analysis
   console.log('[SecurityScan] Phase 5: Content security analysis');
+  emit('content', 43, 'info');
+  
   let contentVulns: Vulnerability[] = [];
   try {
     const { vulnerabilities: contentSecurityVulns } = await analyzePageContent(url, lang);
     contentVulns = contentSecurityVulns;
     console.log(`[SecurityScan] Phase 5 complete - Content vulnerabilities: ${contentVulns.length}`);
+    emit('content_complete', 48, contentVulns.length > 0 ? 'warning' : 'success', `${contentVulns.length} içerik açığı`);
   } catch (error) {
     console.error('[SecurityScan] Content analysis failed:', error);
+    emit('content_complete', 48, 'neutral', 'İçerik analizi tamamlandı');
   }
 
   // Phase 5b: Active security scanning (SQLi, XSS, sensitive files)
   console.log('[SecurityScan] Phase 5b: Active vulnerability scanning');
+  emit('active', 49, 'info');
+  emit('active_files', 52, 'info');
+  emit('active_sqli', 55, 'warning');
+  emit('active_xss', 58, 'warning');
+  
   let activeVulns: Vulnerability[] = [];
   let sensitiveFiles: Array<{ path: string; type: string; risk: string }> = [];
   try {
@@ -242,8 +289,10 @@ export async function performSecurityScan(
       .map(f => ({ path: f.path, type: f.type, risk: f.risk }));
 
     console.log(`[SecurityScan] Phase 5b complete - Active vulns: ${activeVulns.length}, Sensitive files: ${sensitiveFiles.length}`);
+    emit('active_complete', 65, activeVulns.length > 0 ? 'warning' : 'success', `${activeVulns.length} aktif açık`);
   } catch (error) {
     console.error('[SecurityScan] Active scanning failed:', error);
+    emit('active_complete', 65, 'neutral', 'Aktif tarama tamamlandı');
   }
 
   // Phase 5c: Cookie security analysis
@@ -258,18 +307,24 @@ export async function performSecurityScan(
 
   // Phase 5d: HTTP Methods scanning
   console.log('[SecurityScan] Phase 5d: HTTP Methods scanning');
+  emit('http_methods', 70, 'info');
+  
   let httpMethodsResult: HttpMethodsResult = { allowedMethods: [], dangerousMethods: [], vulnerabilities: [] };
   let httpMethodsVulns: Vulnerability[] = [];
   try {
     httpMethodsResult = await scanHttpMethods(url, lang);
     httpMethodsVulns = httpMethodsToVulnerabilities(httpMethodsResult, lang);
     console.log(`[SecurityScan] Phase 5d complete - HTTP Methods vulns: ${httpMethodsVulns.length}`);
+    emit('http_methods_complete', 75, httpMethodsVulns.length > 0 ? 'warning' : 'success', `${httpMethodsResult.allowedMethods.length} metod`);
   } catch (error) {
     console.error('[SecurityScan] HTTP Methods scanning failed:', error);
+    emit('http_methods_complete', 75, 'neutral', 'HTTP metod taraması tamamlandı');
   }
 
   // Phase 5e: Robots.txt & Security.txt analysis
   console.log('[SecurityScan] Phase 5e: Robots.txt & Security.txt analysis');
+  emit('robots', 76, 'info');
+  
   let robotsResult: RobotsScanResult = {
     robotsTxt: { exists: false, disallowedPaths: [], sensitivePaths: [], sitemapUrls: [] },
     securityTxt: { exists: false },
@@ -280,12 +335,16 @@ export async function performSecurityScan(
     robotsResult = await scanRobots(url, lang);
     robotsVulns = robotsToVulnerabilities(robotsResult, lang);
     console.log(`[SecurityScan] Phase 5e complete - Robots vulns: ${robotsVulns.length}`);
+    emit('robots_complete', 80, robotsVulns.length > 0 ? 'warning' : 'success', `${robotsResult.robotsTxt.sensitivePaths.length} hassas yol`);
   } catch (error) {
     console.error('[SecurityScan] Robots.txt analysis failed:', error);
+    emit('robots_complete', 80, 'neutral', 'Robots analizi tamamlandı');
   }
 
   // Phase 6: GeoIP lookup
   console.log('[SecurityScan] Phase 6: GeoIP lookup');
+  emit('geoip', 81, 'info');
+  
   let geoipInfo = null;
   if (network.ip !== 'Unknown') {
     try {
@@ -300,6 +359,7 @@ export async function performSecurityScan(
   console.log('[SecurityScan] Phase 7: WHOIS lookup (Premium only)');
   let whoisInfo = null;
   if (isPremium) {
+    emit('whois', 83, 'info');
     try {
       whoisInfo = await getWhoisInfo(hostname);
       console.log(`[SecurityScan] Phase 7 complete - Domain registrar: ${whoisInfo?.registrar || 'Unknown'}`);
@@ -312,6 +372,7 @@ export async function performSecurityScan(
 
   // Phase 8: Vulnerability detection and aggregation
   console.log('[SecurityScan] Phase 8: Vulnerability detection and aggregation');
+  emit('scoring', 85, 'info');
   const headerVulns = await detectVulnerabilities(headers, ssl, techStack, openPorts, lang);
 
   // Combine all vulnerability sources
@@ -340,11 +401,14 @@ export async function performSecurityScan(
 
   // Phase 10: Compliance checks
   console.log('[SecurityScan] Phase 10: Compliance checks');
+  emit('compliance', 90, 'info');
+  
   const compliance = checkCompliance(headers, ssl, uniqueVulns, url.startsWith('https://'), lang);
   console.log(`[SecurityScan] Phase 10 complete - Compliance standards checked: ${compliance.length}`);
 
   // Phase 11: Action plan generation
   console.log('[SecurityScan] Phase 11: Action plan generation');
+  emit('report', 95, 'info');
   const fullActionPlan = generateActionPlan(uniqueVulns, ssl, lang);
   const actionPlan = isPremium ? fullActionPlan : fullActionPlan.slice(0, 3); // Free users get only 3 items
   console.log(`[SecurityScan] Phase 11 complete - Action items: ${actionPlan.length}`);
@@ -396,6 +460,8 @@ export async function performSecurityScan(
   };
 
   console.log(`[SecurityScan] Scan complete for ${url}`);
+  emit('complete', 100, 'success', `Skor: ${scoreBreakdown.total}/100`);
+  
   return report;
 }
 

@@ -21,6 +21,7 @@ const App: React.FC = () => {
     error,
     validationError,
     isTerminalReady,
+    scanId,
     startScan,
     reset,
     handleTerminalComplete,
@@ -179,7 +180,12 @@ const App: React.FC = () => {
                </div>
              </div>
              <div className="relative z-10 w-full">
-               <ScanTerminal onComplete={handleTerminalComplete} lang={lang} />
+               <ScanTerminal 
+                 onComplete={handleTerminalComplete} 
+                 lang={lang} 
+                 scanId={scanId || undefined}
+                 useSSE={false}
+               />
              </div>
           </div>
         )}
