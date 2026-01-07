@@ -93,6 +93,24 @@ export interface NetworkInfo {
   ports: number[];
 }
 
+// New types for enhanced scanning
+export interface CVEInfo {
+  id: string;
+  cvssScore: number;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  description: string;
+  publishedDate: string;
+  nvdUrl: string;
+  hasExploit: boolean;
+}
+
+export interface CVECorrelationResult {
+  technology: string;
+  version?: string;
+  cves: CVEInfo[];
+  totalCount: number;
+}
+
 export interface SecurityReport {
   targetUrl: string;
   scanTimestamp: string;
@@ -109,4 +127,14 @@ export interface SecurityReport {
   darkWebLeaks: DarkWebLeak[];
   actionPlan: ActionPlanItem[];
   isPremium?: boolean; // Added for backend response
+  // New fields for enhanced scanning
+  httpMethods?: {
+    allowed: string[];
+    dangerous: string[];
+  };
+  robotsAnalysis?: {
+    sensitivePaths: string[];
+    hasSecurityTxt: boolean;
+  };
+  cveCorrelations?: CVECorrelationResult[];
 }

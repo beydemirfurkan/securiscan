@@ -7,6 +7,9 @@
  * - Cookie security analysis
  * - Certificate Transparency subdomain enumeration
  * - Subdomain takeover detection
+ * - HTTP Methods scanning
+ * - Robots.txt & Security.txt analysis
+ * - CVE correlation for detected technologies
  */
 import { scanSSL, SSLInfo } from './ssl-scanner';
 import { scanHeaders, HeaderAnalysis, analyzeCookies, cookiesToVulnerabilities, CookieAnalysis } from './header-scanner';
@@ -19,6 +22,9 @@ import { generateActionPlan, ActionPlanItem } from './action-plan-generator';
 import { analyzePageContent, ContentAnalysisResult } from './content-analyzer';
 import { checkCompliance } from './compliance-checker';
 import { performActiveScan, convertToVulnerabilities as activeToVulns, ActiveScanResult } from './active-scanner';
+import { scanHttpMethods, httpMethodsToVulnerabilities, HttpMethodsResult } from './http-methods-scanner';
+import { scanRobots, robotsToVulnerabilities, RobotsScanResult } from './robots-scanner';
+import { correlateCVEs, cveCorrelationsToVulnerabilities, CVECorrelationResult } from './cve-correlator';
 import { getGeoIP, formatLocation } from '../services/geoip.service';
 import { getWhoisInfo, getDaysUntilExpiration } from '../services/whois.service';
 
@@ -65,6 +71,16 @@ export interface SecurityReport {
     enhancedSubdomains: boolean;
     takeoverCheck: boolean;
   };
+  // New fields for enhanced scanning
+  httpMethods?: {
+    allowed: string[];
+    dangerous: string[];
+  };
+  robotsAnalysis?: {
+    sensitivePaths: string[];
+    hasSecurityTxt: boolean;
+  };
+  cveCorrelations?: CVECorrelationResult[];
 }
 
 /**
@@ -138,6 +154,41 @@ export async function performSecurityScan(
     console.error('[SecurityScan] Tech detection failed:', error);
   }
 
+  // Phase 3b: CVE Correlation for detected technologies
+  console.log('[SecurityScan] Phase 3b: CVE Correlation');
+  let cveCorrelations: CVECorrelationResult[] = [];
+  let cveVulns: Vulnerability[] = [];
+  try {
+    cveCorrelations = await correlateCVEs(techStack, lang);
+    const cveVulnResults = cveCorrelationsToVulnerabilities(cveCorrelations, lang);
+    // Convert to Vulnerability format
+    cveVulns = cveVulnResults.map(cve => ({
+      id: cve.id,
+      title: cve.title,
+      description: cve.description,
+      severity: cve.severity as any,
+      location: cve.technology,
+      remediation: lang === 'tr' 
+        ? `${cve.technology} sürümünü güncelleyin. Detaylar: ${cve.nvdUrl}`
+        : `Update ${cve.technology} version. Details: ${cve.nvdUrl}`,
+      cvssScore: cve.cvssScore,
+      exploitExample: cve.hasExploit 
+        ? (lang === 'tr' ? 'Bilinen exploit mevcut' : 'Known exploit available')
+        : '',
+      exploitablePaths: cve.hasExploit ? [{
+        description: lang === 'tr' ? 'Bilinen Exploit' : 'Known Exploit',
+        scenario: lang === 'tr' 
+          ? 'Bu güvenlik açığı için bilinen bir exploit mevcut'
+          : 'A known exploit exists for this vulnerability',
+        impact: lang === 'tr' ? 'Yüksek risk - acil güncelleme gerekli' : 'High risk - immediate update required'
+      }] : [],
+      relatedCves: [{ name: cve.cveId, url: cve.nvdUrl }],
+    }));
+    console.log(`[SecurityScan] Phase 3b complete - CVE correlations: ${cveCorrelations.length}, CVE vulns: ${cveVulns.length}`);
+  } catch (error) {
+    console.error('[SecurityScan] CVE correlation failed:', error);
+  }
+
   // Phase 4: Enhanced Subdomain scanning with crt.sh (premium only)
   console.log('[SecurityScan] Phase 4: Enhanced Subdomain scanning with crt.sh (Premium only)');
   let subdomains: SubdomainInfo[] = [];
@@ -205,6 +256,34 @@ export async function performSecurityScan(
     console.error('[SecurityScan] Cookie analysis failed:', error);
   }
 
+  // Phase 5d: HTTP Methods scanning
+  console.log('[SecurityScan] Phase 5d: HTTP Methods scanning');
+  let httpMethodsResult: HttpMethodsResult = { allowedMethods: [], dangerousMethods: [], vulnerabilities: [] };
+  let httpMethodsVulns: Vulnerability[] = [];
+  try {
+    httpMethodsResult = await scanHttpMethods(url, lang);
+    httpMethodsVulns = httpMethodsToVulnerabilities(httpMethodsResult, lang);
+    console.log(`[SecurityScan] Phase 5d complete - HTTP Methods vulns: ${httpMethodsVulns.length}`);
+  } catch (error) {
+    console.error('[SecurityScan] HTTP Methods scanning failed:', error);
+  }
+
+  // Phase 5e: Robots.txt & Security.txt analysis
+  console.log('[SecurityScan] Phase 5e: Robots.txt & Security.txt analysis');
+  let robotsResult: RobotsScanResult = {
+    robotsTxt: { exists: false, disallowedPaths: [], sensitivePaths: [], sitemapUrls: [] },
+    securityTxt: { exists: false },
+    findings: [],
+  };
+  let robotsVulns: Vulnerability[] = [];
+  try {
+    robotsResult = await scanRobots(url, lang);
+    robotsVulns = robotsToVulnerabilities(robotsResult, lang);
+    console.log(`[SecurityScan] Phase 5e complete - Robots vulns: ${robotsVulns.length}`);
+  } catch (error) {
+    console.error('[SecurityScan] Robots.txt analysis failed:', error);
+  }
+
   // Phase 6: GeoIP lookup
   console.log('[SecurityScan] Phase 6: GeoIP lookup');
   let geoipInfo = null;
@@ -242,6 +321,9 @@ export async function performSecurityScan(
     ...activeVulns,      // Active scanning (SQLi, XSS, sensitive files)
     ...cookieVulns,      // Cookie security issues
     ...takeoverVulns,    // Subdomain takeover risks (premium)
+    ...httpMethodsVulns, // HTTP Methods vulnerabilities
+    ...robotsVulns,      // Robots.txt sensitive paths
+    ...cveVulns,         // CVE correlations for detected technologies
   ];
 
   // Remove duplicates based on ID
@@ -301,6 +383,16 @@ export async function performSecurityScan(
       enhancedSubdomains: isPremium,
       takeoverCheck: isPremium && takeoverVulns.length >= 0,
     },
+    // New fields for enhanced scanning
+    httpMethods: {
+      allowed: httpMethodsResult.allowedMethods,
+      dangerous: httpMethodsResult.dangerousMethods,
+    },
+    robotsAnalysis: {
+      sensitivePaths: robotsResult.robotsTxt.sensitivePaths,
+      hasSecurityTxt: robotsResult.securityTxt.exists,
+    },
+    cveCorrelations,
   };
 
   console.log(`[SecurityScan] Scan complete for ${url}`);

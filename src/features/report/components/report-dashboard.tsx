@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { SecurityReport, Severity, TechStackItem, ActionPlanItem } from '../../../types';
 import VulnerabilityCard from './vulnerability-card';
 import { translations } from '../../../i18n';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
-import { X, Download, Shield, Globe, FileText, Lock, Settings, ChevronRight, AlertTriangle, Map, Database, Eye, Clock, Zap, ExternalLink, Cpu, TrendingDown, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, Download, Shield, Globe, FileText, Lock, Settings, ChevronRight, AlertTriangle, Map, Database, Eye, Clock, Zap, ExternalLink, Cpu, TrendingDown, ArrowUpDown, ChevronUp, ChevronDown, Loader2, CheckCircle, XCircle, Server, FileSearch, Bug, ShieldAlert, FolderSearch } from 'lucide-react';
+import { exportToPdf, exportToJson } from '../../../services/report-exporter.service';
 
 interface Props {
   report: SecurityReport;
@@ -14,11 +15,90 @@ interface Props {
 type SortKey = 'priority' | 'estimatedTime';
 type SortOrder = 'asc' | 'desc';
 
+// Toast notification types
+type ToastType = 'success' | 'error' | 'loading';
+
+interface Toast {
+  id: string;
+  type: ToastType;
+  message: string;
+}
+
 const ReportDashboard: React.FC<Props> = ({ report, onReset, lang }) => {
   const [selectedTech, setSelectedTech] = useState<TechStackItem | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; order: SortOrder } | null>(null);
+  const [isExporting, setIsExporting] = useState<'pdf' | 'json' | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   
   const t = translations[lang];
+
+  // Toast notification helpers
+  const addToast = useCallback((type: ToastType, message: string) => {
+    const id = Date.now().toString();
+    setToasts(prev => [...prev, { id, type, message }]);
+    
+    // Auto-remove after 4 seconds (except loading)
+    if (type !== 'loading') {
+      setTimeout(() => {
+        setToasts(prev => prev.filter(toast => toast.id !== id));
+      }, 4000);
+    }
+    return id;
+  }, []);
+
+  const removeToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id));
+  }, []);
+
+  // Export handlers
+  const handleExportPdf = useCallback(async () => {
+    setIsExporting('pdf');
+    setShowExportMenu(false);
+    const loadingToastId = addToast('loading', lang === 'tr' ? 'PDF oluşturuluyor...' : 'Generating PDF...');
+    
+    try {
+      const result = await exportToPdf(report, { language: lang });
+      removeToast(loadingToastId);
+      
+      if (result.success) {
+        addToast('success', lang === 'tr' 
+          ? `PDF başarıyla indirildi: ${result.filename}` 
+          : `PDF downloaded successfully: ${result.filename}`);
+      } else {
+        addToast('error', result.error || (lang === 'tr' ? 'PDF oluşturulamadı' : 'Failed to generate PDF'));
+      }
+    } catch (error) {
+      removeToast(loadingToastId);
+      addToast('error', lang === 'tr' ? 'PDF oluşturulurken hata oluştu' : 'Error generating PDF');
+    } finally {
+      setIsExporting(null);
+    }
+  }, [report, lang, addToast, removeToast]);
+
+  const handleExportJson = useCallback(async () => {
+    setIsExporting('json');
+    setShowExportMenu(false);
+    const loadingToastId = addToast('loading', lang === 'tr' ? 'JSON oluşturuluyor...' : 'Generating JSON...');
+    
+    try {
+      const result = await exportToJson(report, { language: lang });
+      removeToast(loadingToastId);
+      
+      if (result.success) {
+        addToast('success', lang === 'tr' 
+          ? `JSON başarıyla indirildi: ${result.filename}` 
+          : `JSON downloaded successfully: ${result.filename}`);
+      } else {
+        addToast('error', result.error || (lang === 'tr' ? 'JSON oluşturulamadı' : 'Failed to generate JSON'));
+      }
+    } catch (error) {
+      removeToast(loadingToastId);
+      addToast('error', lang === 'tr' ? 'JSON oluşturulurken hata oluştu' : 'Error generating JSON');
+    } finally {
+      setIsExporting(null);
+    }
+  }, [report, lang, addToast, removeToast]);
 
   const severityCount = {
     [Severity.CRITICAL]: report.vulnerabilities.filter(v => v.severity === Severity.CRITICAL).length,
@@ -109,12 +189,42 @@ const ReportDashboard: React.FC<Props> = ({ report, onReset, lang }) => {
           <p className="text-gray-400 font-mono text-sm">{report.targetUrl} • {report.scanTimestamp}</p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <button 
-            onClick={() => {}}
-            className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2 rounded-lg transition-colors border border-blue-500/50 font-mono text-sm flex items-center gap-2"
-          >
-            <Download className="w-4 h-4" /> PDF / JSON
-          </button>
+          <div className="relative">
+            <button 
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              disabled={isExporting !== null}
+              className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2 rounded-lg transition-colors border border-blue-500/50 font-mono text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              {isExporting === 'pdf' ? (lang === 'tr' ? 'PDF İndiriliyor...' : 'Downloading PDF...') :
+               isExporting === 'json' ? (lang === 'tr' ? 'JSON İndiriliyor...' : 'Downloading JSON...') :
+               'PDF / JSON'}
+            </button>
+            
+            {/* Export dropdown menu */}
+            {showExportMenu && !isExporting && (
+              <div className="absolute top-full left-0 mt-2 bg-cyber-dark border border-gray-700 rounded-lg shadow-xl z-50 min-w-[160px] overflow-hidden">
+                <button
+                  onClick={handleExportPdf}
+                  className="w-full px-4 py-3 text-left text-sm text-gray-300 hover:bg-blue-500/10 hover:text-blue-400 transition-colors flex items-center gap-2 border-b border-gray-800"
+                >
+                  <FileText className="w-4 h-4" />
+                  {lang === 'tr' ? 'PDF İndir' : 'Download PDF'}
+                </button>
+                <button
+                  onClick={handleExportJson}
+                  className="w-full px-4 py-3 text-left text-sm text-gray-300 hover:bg-green-500/10 hover:text-green-400 transition-colors flex items-center gap-2"
+                >
+                  <Database className="w-4 h-4" />
+                  {lang === 'tr' ? 'JSON İndir' : 'Download JSON'}
+                </button>
+              </div>
+            )}
+          </div>
           <button onClick={onReset} className="bg-cyber-gray hover:bg-gray-700 text-white px-6 py-2 rounded-lg transition-colors border border-gray-600 font-mono text-sm">
             {lang === 'tr' ? 'Yeni Tarama' : 'New Scan'}
           </button>
@@ -293,17 +403,228 @@ const ReportDashboard: React.FC<Props> = ({ report, onReset, lang }) => {
           05 // {t.techStackTitle}
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {report.techStackDetected.map((tech, i) => (
-            <div key={i} onClick={() => setSelectedTech(tech)} className="group bg-cyber-dark border border-gray-800 p-6 rounded-xl hover:border-cyber-green/50 hover:bg-white/[0.02] transition-all cursor-pointer relative">
-              <div className="w-10 h-10 bg-cyber-green/5 rounded-lg flex items-center justify-center mb-4 border border-cyber-green/10">
-                 <Cpu className="w-5 h-5 text-cyber-green" />
+          {report.techStackDetected.map((tech, i) => {
+            // Find CVE correlations for this technology
+            const techCves = report.cveCorrelations?.find(c => c.technology.toLowerCase() === tech.name.toLowerCase());
+            
+            return (
+              <div key={i} onClick={() => setSelectedTech(tech)} className="group bg-cyber-dark border border-gray-800 p-6 rounded-xl hover:border-cyber-green/50 hover:bg-white/[0.02] transition-all cursor-pointer relative">
+                <div className="w-10 h-10 bg-cyber-green/5 rounded-lg flex items-center justify-center mb-4 border border-cyber-green/10">
+                   <Cpu className="w-5 h-5 text-cyber-green" />
+                </div>
+                <h4 className="text-white font-bold mb-2 font-mono">{tech.name}</h4>
+                <p className="text-gray-500 text-xs leading-relaxed mb-4 line-clamp-2">{tech.description}</p>
+                
+                {/* CVE Badge */}
+                {techCves && techCves.totalCount > 0 && (
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-800">
+                    <Bug className="w-3.5 h-3.5 text-red-400" />
+                    <span className="text-[10px] font-bold text-red-400">
+                      {techCves.totalCount} CVE{techCves.totalCount > 1 ? 's' : ''} {lang === 'tr' ? 'bulundu' : 'found'}
+                    </span>
+                  </div>
+                )}
               </div>
-              <h4 className="text-white font-bold mb-2 font-mono">{tech.name}</h4>
-              <p className="text-gray-500 text-xs leading-relaxed mb-4 line-clamp-2">{tech.description}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
+
+      {/* 5b. SECTION: CVE CORRELATIONS */}
+      {report.cveCorrelations && report.cveCorrelations.length > 0 && (
+        <section className="space-y-6">
+          <h3 className="text-cyber-green font-mono text-xs uppercase tracking-[0.3em] border-l-2 border-cyber-green pl-3 mb-6">
+            05b // {lang === 'tr' ? 'CVE KORELASYONLARI' : 'CVE CORRELATIONS'}
+          </h3>
+          <div className="bg-cyber-dark border border-gray-800 rounded-xl overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-gray-800 flex items-center gap-3">
+              <Bug className="w-5 h-5 text-red-400" />
+              <span className="text-white font-bold">
+                {lang === 'tr' ? 'Tespit Edilen Teknolojilere Ait Bilinen Güvenlik Açıkları' : 'Known Vulnerabilities for Detected Technologies'}
+              </span>
+            </div>
+            <div className="divide-y divide-gray-800">
+              {report.cveCorrelations.map((correlation, idx) => (
+                <div key={idx} className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <Cpu className="w-4 h-4 text-cyber-green" />
+                      <span className="text-white font-bold font-mono">{correlation.technology}</span>
+                      {correlation.version && (
+                        <span className="text-gray-500 text-xs font-mono">v{correlation.version}</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                      {correlation.totalCount} CVE
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {correlation.cves.slice(0, 3).map((cve, cveIdx) => (
+                      <div key={cveIdx} className="flex items-start gap-4 p-3 bg-black/30 rounded-lg border border-gray-800/50">
+                        <div className={`w-10 h-10 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                          cve.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                          cve.severity === 'HIGH' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                          cve.severity === 'MEDIUM' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                          'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                        }`}>
+                          {cve.cvssScore.toFixed(1)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-white font-mono text-sm font-bold">{cve.id}</span>
+                            {cve.hasExploit && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
+                                EXPLOIT
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-gray-400 text-xs line-clamp-2">{cve.description}</p>
+                          <a 
+                            href={cve.nvdUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 mt-2"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            NVD {lang === 'tr' ? 'Detayları' : 'Details'}
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                    {correlation.cves.length > 3 && (
+                      <div className="text-center text-gray-500 text-xs py-2">
+                        +{correlation.cves.length - 3} {lang === 'tr' ? 'daha fazla CVE' : 'more CVEs'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* 6. SECTION: HTTP METHODS & ROBOTS ANALYSIS */}
+      {(report.httpMethods || report.robotsAnalysis) && (
+        <section className="space-y-6">
+          <h3 className="text-cyber-green font-mono text-xs uppercase tracking-[0.3em] border-l-2 border-cyber-green pl-3 mb-6">
+            06 // {lang === 'tr' ? 'SUNUCU YAPILANDIRMASI' : 'SERVER CONFIGURATION'}
+          </h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* HTTP Methods Card */}
+            {report.httpMethods && (
+              <div className="bg-cyber-dark border border-gray-800 rounded-xl p-6 shadow-2xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <Server className="w-5 h-5 text-blue-400" />
+                  <h4 className="text-white font-bold">HTTP {lang === 'tr' ? 'Metodları' : 'Methods'}</h4>
+                </div>
+                
+                {/* Allowed Methods */}
+                <div className="mb-4">
+                  <span className="text-[10px] text-gray-500 uppercase font-bold block mb-2">
+                    {lang === 'tr' ? 'İzin Verilen Metodlar' : 'Allowed Methods'}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {report.httpMethods.allowed.length > 0 ? (
+                      report.httpMethods.allowed.map((method, i) => (
+                        <span 
+                          key={i} 
+                          className={`text-xs font-mono px-2 py-1 rounded border ${
+                            report.httpMethods?.dangerous.includes(method)
+                              ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                              : 'bg-gray-800 text-gray-300 border-gray-700'
+                          }`}
+                        >
+                          {method}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-gray-500 text-xs italic">
+                        {lang === 'tr' ? 'Tespit edilemedi' : 'Not detected'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Dangerous Methods Warning */}
+                {report.httpMethods.dangerous.length > 0 && (
+                  <div className="mt-4 p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400" />
+                      <span className="text-red-400 text-xs font-bold uppercase">
+                        {lang === 'tr' ? 'Tehlikeli Metodlar Aktif' : 'Dangerous Methods Enabled'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {report.httpMethods.dangerous.map((method, i) => (
+                        <span key={i} className="text-xs font-mono px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/30">
+                          {method}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Robots.txt Analysis Card */}
+            {report.robotsAnalysis && (
+              <div className="bg-cyber-dark border border-gray-800 rounded-xl p-6 shadow-2xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <FolderSearch className="w-5 h-5 text-yellow-400" />
+                  <h4 className="text-white font-bold">Robots.txt & Security.txt</h4>
+                </div>
+                
+                {/* Security.txt Status */}
+                <div className="mb-4 p-3 rounded-lg border ${report.robotsAnalysis.hasSecurityTxt ? 'bg-green-500/5 border-green-500/20' : 'bg-yellow-500/5 border-yellow-500/20'}">
+                  <div className="flex items-center gap-2">
+                    {report.robotsAnalysis.hasSecurityTxt ? (
+                      <>
+                        <CheckCircle className="w-4 h-4 text-green-400" />
+                        <span className="text-green-400 text-xs font-bold">
+                          security.txt {lang === 'tr' ? 'mevcut' : 'present'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                        <span className="text-yellow-400 text-xs font-bold">
+                          security.txt {lang === 'tr' ? 'bulunamadı' : 'not found'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Sensitive Paths */}
+                {report.robotsAnalysis.sensitivePaths.length > 0 && (
+                  <div>
+                    <span className="text-[10px] text-gray-500 uppercase font-bold block mb-2">
+                      {lang === 'tr' ? 'Hassas Yollar (robots.txt)' : 'Sensitive Paths (robots.txt)'}
+                    </span>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {report.robotsAnalysis.sensitivePaths.map((path, i) => (
+                        <div key={i} className="flex items-center gap-2 p-2 bg-orange-500/5 border border-orange-500/20 rounded">
+                          <FileSearch className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                          <span className="text-orange-300 text-xs font-mono truncate">{path}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {report.robotsAnalysis.sensitivePaths.length === 0 && (
+                  <div className="text-gray-500 text-xs italic">
+                    {lang === 'tr' ? 'Hassas yol tespit edilmedi' : 'No sensitive paths detected'}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
       
       {/* 7. SECTION: NETWORK */}
       <section className="space-y-6">
@@ -326,6 +647,43 @@ const ReportDashboard: React.FC<Props> = ({ report, onReset, lang }) => {
           </div>
         </div>
       </section>
+
+      {/* Toast Notifications */}
+      <div className="fixed bottom-4 right-4 z-50 space-y-2">
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg border backdrop-blur-sm animate-fade-in max-w-sm ${
+              toast.type === 'success' 
+                ? 'bg-green-500/10 border-green-500/30 text-green-400' 
+                : toast.type === 'error'
+                ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+            }`}
+          >
+            {toast.type === 'success' && <CheckCircle className="w-5 h-5 shrink-0" />}
+            {toast.type === 'error' && <XCircle className="w-5 h-5 shrink-0" />}
+            {toast.type === 'loading' && <Loader2 className="w-5 h-5 shrink-0 animate-spin" />}
+            <span className="text-sm font-mono">{toast.message}</span>
+            {toast.type !== 'loading' && (
+              <button 
+                onClick={() => removeToast(toast.id)}
+                className="ml-2 hover:opacity-70 transition-opacity"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Click outside to close export menu */}
+      {showExportMenu && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setShowExportMenu(false)}
+        />
+      )}
     </div>
   );
 };

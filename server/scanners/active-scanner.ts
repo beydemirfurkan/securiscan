@@ -18,6 +18,16 @@ export interface ActiveScanResult {
   xss: XssResult[];
   openRedirect: OpenRedirectResult[];
   cors: CorsResult | null;
+  directoryTraversal: DirectoryTraversalResult[];
+}
+
+export interface DirectoryTraversalResult {
+  vulnerable: boolean;
+  payload: string;
+  evidence: string;
+  targetFile: string;
+  parameter: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
 export interface SensitiveFileResult {
@@ -48,6 +58,9 @@ export interface OpenRedirectResult {
   parameter: string;
   vulnerable: boolean;
   redirectedTo: string;
+  exploitUrl: string;
+  severity: 'MEDIUM';
+  payload: string;
 }
 
 export interface CorsResult {
@@ -55,6 +68,8 @@ export interface CorsResult {
   allowCredentials: boolean;
   vulnerable: boolean;
   issue: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | null;
+  testedOrigins: string[];
 }
 
 // ==================== CONSTANTS ====================
@@ -166,6 +181,91 @@ const XSS_PAYLOADS = [
   '<body onload=alert(1)>',
 ];
 
+// Directory Traversal patterns
+const TRAVERSAL_PATTERNS = [
+  // Basic patterns
+  '../',
+  '..\\',
+  // URL encoded
+  '..%2f',
+  '..%2F',
+  '..%5c',
+  '..%5C',
+  // Double URL encoded
+  '..%252f',
+  '..%252F',
+  '..%255c',
+  '..%255C',
+  // Unicode/UTF-8 encoded
+  '..%c0%af',
+  '..%c1%9c',
+  // Null byte injection (for older systems)
+  '../%00',
+  '..\\%00',
+  // Mixed encoding
+  '....///',
+  '....\\\\\\',
+  // Overlong UTF-8
+  '%2e%2e%2f',
+  '%2e%2e/',
+  '.%2e/',
+];
+
+// Target files for directory traversal detection
+const TRAVERSAL_TARGET_FILES = [
+  // Unix/Linux files
+  {
+    path: '/etc/passwd',
+    indicators: ['root:x:', 'root:*:', 'daemon:', 'bin:', 'nobody:'],
+    os: 'unix',
+  },
+  {
+    path: '/etc/shadow',
+    indicators: ['root:', '$1$', '$5$', '$6$', '$y$'],
+    os: 'unix',
+  },
+  {
+    path: '/etc/hosts',
+    indicators: ['localhost', '127.0.0.1', '::1'],
+    os: 'unix',
+  },
+  // Windows files
+  {
+    path: 'C:\\Windows\\win.ini',
+    indicators: ['[fonts]', '[extensions]', '[mci extensions]', '[files]'],
+    os: 'windows',
+  },
+  {
+    path: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
+    indicators: ['localhost', '127.0.0.1'],
+    os: 'windows',
+  },
+  {
+    path: 'C:\\boot.ini',
+    indicators: ['[boot loader]', '[operating systems]', 'multi(0)'],
+    os: 'windows',
+  },
+  // Web config files
+  {
+    path: 'web.config',
+    indicators: ['<configuration>', '<system.web>', '<connectionStrings>', '<?xml'],
+    os: 'any',
+  },
+  {
+    path: 'WEB-INF/web.xml',
+    indicators: ['<web-app', '<servlet>', '<filter>', '<?xml'],
+    os: 'any',
+  },
+];
+
+// Common parameters that might be vulnerable to directory traversal
+const TRAVERSAL_PARAMS = [
+  'file', 'path', 'filepath', 'filename', 'doc', 'document', 'page', 'pg',
+  'include', 'dir', 'directory', 'folder', 'root', 'template', 'tmpl',
+  'load', 'read', 'download', 'content', 'view', 'show', 'display',
+  'cat', 'action', 'board', 'date', 'detail', 'name', 'item', 'module',
+];
+
 // ==================== MAIN SCANNER ====================
 
 /**
@@ -183,15 +283,16 @@ export async function performActiveScan(
   const baseUrl = new URL(url).origin;
 
   // Run all scans in parallel for speed
-  const [sensitiveFiles, sqlInjection, xss, openRedirect, cors] = await Promise.all([
+  const [sensitiveFiles, sqlInjection, xss, openRedirect, cors, directoryTraversal] = await Promise.all([
     scanSensitiveFiles(baseUrl),
     scanForSqlInjection(url),
     scanForXss(url),
     scanForOpenRedirect(url),
     scanForCorsMisconfiguration(url),
+    scanForDirectoryTraversal(url),
   ]);
 
-  console.log(`[ActiveScanner] Scan complete - Found ${sensitiveFiles.filter(f => f.accessible).length} accessible files, ${sqlInjection.filter(s => s.detected).length} SQLi, ${xss.filter(x => x.reflected).length} XSS`);
+  console.log(`[ActiveScanner] Scan complete - Found ${sensitiveFiles.filter(f => f.accessible).length} accessible files, ${sqlInjection.filter(s => s.detected).length} SQLi, ${xss.filter(x => x.reflected).length} XSS, ${directoryTraversal.filter(d => d.vulnerable).length} Dir Traversal`);
 
   return {
     sensitiveFiles,
@@ -199,6 +300,7 @@ export async function performActiveScan(
     xss,
     openRedirect,
     cors,
+    directoryTraversal,
   };
 }
 
@@ -417,94 +519,413 @@ async function scanForXss(url: string): Promise<XssResult[]> {
 
 // ==================== OPEN REDIRECT SCANNER ====================
 
+// Extended list of redirect parameters
+const REDIRECT_PARAMS = [
+  // Common redirect parameters
+  'url', 'redirect', 'next', 'return', 'returnUrl', 'goto', 'dest', 'destination',
+  'redir', 'redirect_uri', 'redirect_url', 'return_url', 'returnTo', 'return_to',
+  // OAuth/SSO related
+  'callback', 'callback_url', 'continue', 'continueTo', 'forward', 'forward_url',
+  // Navigation related
+  'target', 'to', 'out', 'view', 'link', 'linkurl', 'go', 'jump', 'jump_url',
+  // Legacy/CMS related
+  'uri', 'u', 'r', 'ref', 'referrer', 'site', 'html', 'page', 'feed',
+  // Path-based
+  'path', 'path_info', 'data', 'domain', 'host', 'location', 'checkout_url',
+  // Action related
+  'action', 'service', 'image_url', 'img_url', 'file', 'load', 'source',
+];
+
+// Test payloads for open redirect detection
+const REDIRECT_PAYLOADS = [
+  { payload: 'https://evil.com/phishing', type: 'direct' as const },
+  { payload: '//evil.com/phishing', type: 'protocol-relative' as const },
+  { payload: 'https:evil.com', type: 'malformed' as const },
+  { payload: '////evil.com', type: 'multiple-slash' as const },
+  { payload: 'https://evil.com%2f%2f', type: 'encoded' as const },
+  { payload: 'https://evil.com@legitimate.com', type: 'at-sign' as const },
+  { payload: 'https://legitimate.com.evil.com', type: 'subdomain-trick' as const },
+];
+
 /**
- * Scan for open redirect vulnerabilities
+ * Generate exploit URL example for open redirect
+ */
+export function generateExploitUrl(baseUrl: string, parameter: string, payload: string): string {
+  try {
+    const url = new URL(baseUrl);
+    url.searchParams.set(parameter, payload);
+    return url.toString();
+  } catch {
+    return `${baseUrl}?${parameter}=${encodeURIComponent(payload)}`;
+  }
+}
+
+/**
+ * Scan for open redirect vulnerabilities with enhanced detection
  */
 async function scanForOpenRedirect(url: string): Promise<OpenRedirectResult[]> {
   const results: OpenRedirectResult[] = [];
-  const redirectParams = ['url', 'redirect', 'next', 'return', 'returnUrl', 'goto', 'dest', 'destination', 'redir', 'redirect_uri'];
-  const evilUrl = 'https://evil.com/phishing';
-
   const parsedUrl = new URL(url);
+  const existingParams = Array.from(new URLSearchParams(parsedUrl.search).keys());
+  
+  // Test existing parameters first, then common redirect parameters
+  const paramsToTest = [
+    ...existingParams.filter(p => REDIRECT_PARAMS.includes(p.toLowerCase())),
+    ...REDIRECT_PARAMS.slice(0, 20), // Limit to avoid too many requests
+  ];
+  
+  // Remove duplicates
+  const uniqueParams = [...new Set(paramsToTest)];
 
-  for (const param of redirectParams) {
-    const testUrl = new URL(url);
-    testUrl.searchParams.set(param, evilUrl);
+  for (const param of uniqueParams.slice(0, 15)) {
+    for (const { payload, type } of REDIRECT_PAYLOADS) {
+      const testUrl = new URL(url);
+      testUrl.searchParams.set(param, payload);
 
-    try {
-      const response = await axios.get(testUrl.toString(), {
-        timeout: 10000,
-        validateStatus: () => true,
-        maxRedirects: 0, // Don't follow redirects
-      });
-
-      const locationHeader = response.headers['location'];
-
-      if (locationHeader && locationHeader.includes('evil.com')) {
-        results.push({
-          parameter: param,
-          vulnerable: true,
-          redirectedTo: locationHeader,
+      try {
+        const response = await axios.get(testUrl.toString(), {
+          timeout: 10000,
+          validateStatus: () => true,
+          maxRedirects: 0, // Don't follow redirects
         });
+
+        const locationHeader = response.headers['location'];
+        const statusCode = response.status;
+
+        // Check for redirect status codes (3xx)
+        if (statusCode >= 300 && statusCode < 400 && locationHeader) {
+          // Check if the redirect goes to an external domain
+          if (isExternalRedirect(locationHeader, parsedUrl.hostname)) {
+            const exploitUrl = generateExploitUrl(url, param, payload);
+            
+            results.push({
+              parameter: param,
+              vulnerable: true,
+              redirectedTo: locationHeader,
+              exploitUrl,
+              severity: 'MEDIUM',
+              payload,
+            });
+            
+            // Found vulnerability for this param, move to next param
+            break;
+          }
+        }
+      } catch (error) {
+        // Ignore errors
       }
-    } catch (error) {
-      // Ignore errors
     }
   }
 
   return results;
 }
 
+/**
+ * Check if a redirect URL points to an external domain
+ */
+function isExternalRedirect(redirectUrl: string, originalHostname: string): boolean {
+  try {
+    // Handle protocol-relative URLs
+    const normalizedUrl = redirectUrl.startsWith('//') 
+      ? `https:${redirectUrl}` 
+      : redirectUrl;
+    
+    const redirectHostname = new URL(normalizedUrl).hostname;
+    
+    // Check if it's a different domain
+    return redirectHostname !== originalHostname && 
+           !redirectHostname.endsWith(`.${originalHostname}`);
+  } catch {
+    // If URL parsing fails, check for common external indicators
+    return redirectUrl.includes('evil.com') || 
+           redirectUrl.includes('attacker') ||
+           redirectUrl.startsWith('//') ||
+           redirectUrl.match(/^https?:\/\/[^/]*\.[^/]+/) !== null;
+  }
+}
+
 // ==================== CORS SCANNER ====================
 
+// CORS test origins for comprehensive testing
+const CORS_TEST_ORIGINS = [
+  { origin: 'https://evil.com', type: 'external' as const },
+  { origin: 'null', type: 'null' as const },
+  { origin: 'http://evil.com', type: 'scheme-variation' as const },
+];
+
 /**
- * Scan for CORS misconfiguration
+ * Generate subdomain test origins based on target URL
+ */
+function generateSubdomainOrigins(targetUrl: string): { origin: string; type: 'subdomain' }[] {
+  try {
+    const url = new URL(targetUrl);
+    const hostname = url.hostname;
+    
+    return [
+      { origin: `https://evil.${hostname}`, type: 'subdomain' as const },
+      { origin: `https://${hostname}.evil.com`, type: 'subdomain' as const },
+      { origin: `https://sub.${hostname}`, type: 'subdomain' as const },
+    ];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Map CORS vulnerability to severity based on design requirements
+ * - Wildcard origin (*) → HIGH severity
+ * - Reflected origin with credentials → CRITICAL severity
+ * - Reflected origin without credentials → HIGH severity
+ * - Null origin allowed → MEDIUM severity
+ */
+export function mapCorsSeverity(
+  allowOrigin: string | null,
+  allowCredentials: boolean,
+  originType: 'external' | 'null' | 'subdomain' | 'scheme-variation'
+): 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | null {
+  if (!allowOrigin) return null;
+  
+  // Wildcard origin
+  if (allowOrigin === '*') {
+    return 'HIGH';
+  }
+  
+  // Null origin
+  if (allowOrigin === 'null' || originType === 'null') {
+    return 'MEDIUM';
+  }
+  
+  // Reflected origin (external, subdomain, or scheme variation)
+  if (originType === 'external' || originType === 'subdomain' || originType === 'scheme-variation') {
+    if (allowCredentials) {
+      return 'CRITICAL';
+    }
+    return 'HIGH';
+  }
+  
+  return null;
+}
+
+/**
+ * Scan for CORS misconfiguration with enhanced testing
  */
 async function scanForCorsMisconfiguration(url: string): Promise<CorsResult | null> {
+  const testedOrigins: string[] = [];
+  const subdomainOrigins = generateSubdomainOrigins(url);
+  const allOrigins = [...CORS_TEST_ORIGINS, ...subdomainOrigins];
+  
+  let worstResult: CorsResult | null = null;
+  let worstSeverityRank = 0;
+  
+  const severityRank: Record<string, number> = {
+    'CRITICAL': 4,
+    'HIGH': 3,
+    'MEDIUM': 2,
+    'LOW': 1,
+  };
+  
+  for (const testOrigin of allOrigins) {
+    testedOrigins.push(testOrigin.origin);
+    
+    try {
+      const response = await axios.get(url, {
+        timeout: 10000,
+        validateStatus: () => true,
+        headers: {
+          'Origin': testOrigin.origin,
+        },
+      });
+
+      const allowOrigin = response.headers['access-control-allow-origin'];
+      const allowCredentials = response.headers['access-control-allow-credentials'] === 'true';
+
+      if (!allowOrigin) {
+        continue; // No CORS headers for this origin
+      }
+
+      let vulnerable = false;
+      let issue = '';
+      let severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | null = null;
+
+      if (allowOrigin === '*') {
+        vulnerable = true;
+        issue = 'Wildcard origin (*) allows any website to access resources';
+        severity = 'HIGH';
+      } else if (allowOrigin === testOrigin.origin) {
+        vulnerable = true;
+        
+        if (testOrigin.type === 'null') {
+          issue = 'Null origin allowed - can be exploited via sandboxed iframes';
+          severity = 'MEDIUM';
+        } else if (testOrigin.type === 'subdomain') {
+          issue = `Subdomain origin (${testOrigin.origin}) is accepted - potential subdomain takeover risk`;
+          severity = allowCredentials ? 'CRITICAL' : 'HIGH';
+        } else if (testOrigin.type === 'scheme-variation') {
+          issue = `HTTP scheme variation accepted - downgrade attack possible`;
+          severity = allowCredentials ? 'CRITICAL' : 'HIGH';
+        } else {
+          issue = 'Origin is reflected without validation - any origin is accepted';
+          severity = allowCredentials ? 'CRITICAL' : 'HIGH';
+        }
+
+        if (allowCredentials) {
+          issue += ' (with credentials - CRITICAL)';
+        }
+      } else if (allowOrigin === 'null') {
+        vulnerable = true;
+        issue = 'Null origin allowed - can be exploited via sandboxed iframes';
+        severity = 'MEDIUM';
+      }
+
+      if (vulnerable && severity) {
+        const currentRank = severityRank[severity] || 0;
+        
+        if (currentRank > worstSeverityRank) {
+          worstSeverityRank = currentRank;
+          worstResult = {
+            allowOrigin,
+            allowCredentials,
+            vulnerable,
+            issue,
+            severity,
+            testedOrigins: [...testedOrigins],
+          };
+        }
+      }
+    } catch (error) {
+      // Ignore errors for individual origin tests
+    }
+  }
+
+  // Return the worst result found, or null if no vulnerabilities
+  if (worstResult) {
+    worstResult.testedOrigins = testedOrigins;
+    return worstResult;
+  }
+  
+  return null;
+}
+
+// ==================== DIRECTORY TRAVERSAL SCANNER ====================
+
+/**
+ * Scan for directory traversal vulnerabilities
+ * Tests various encoding patterns against common sensitive files
+ */
+async function scanForDirectoryTraversal(url: string): Promise<DirectoryTraversalResult[]> {
+  const results: DirectoryTraversalResult[] = [];
+  const parsedUrl = new URL(url);
+  const params = new URLSearchParams(parsedUrl.search);
+
+  // Determine which parameters to test
+  const paramsToTest = params.toString() !== ''
+    ? Array.from(params.keys())
+    : TRAVERSAL_PARAMS.slice(0, 5); // Test common params if none exist
+
+  // Test each parameter with traversal patterns
+  for (const param of paramsToTest.slice(0, 5)) {
+    for (const targetFile of TRAVERSAL_TARGET_FILES) {
+      for (const pattern of TRAVERSAL_PATTERNS.slice(0, 8)) {
+        // Build traversal payload with multiple depth levels
+        const depths = [3, 5, 7, 10];
+        
+        for (const depth of depths) {
+          const traversalPath = pattern.repeat(depth) + targetFile.path.replace(/^[A-Z]:\\/, '').replace(/\\/g, '/');
+          const testUrl = new URL(url);
+          testUrl.searchParams.set(param, traversalPath);
+
+          const result = await testDirectoryTraversal(
+            testUrl.toString(),
+            param,
+            traversalPath,
+            targetFile
+          );
+
+          if (result.vulnerable) {
+            results.push(result);
+            // Found vulnerability for this param, move to next param
+            break;
+          }
+        }
+
+        // If we found a vulnerability, stop testing this param
+        if (results.some(r => r.parameter === param && r.vulnerable)) {
+          break;
+        }
+      }
+
+      // If we found a vulnerability, stop testing this param
+      if (results.some(r => r.parameter === param && r.vulnerable)) {
+        break;
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Test a single directory traversal payload
+ */
+async function testDirectoryTraversal(
+  testUrl: string,
+  parameter: string,
+  payload: string,
+  targetFile: { path: string; indicators: string[]; os: string }
+): Promise<DirectoryTraversalResult> {
   try {
-    // Test with evil origin
-    const response = await axios.get(url, {
+    const response = await axios.get(testUrl, {
       timeout: 10000,
       validateStatus: () => true,
-      headers: {
-        'Origin': 'https://evil.com',
-      },
+      maxRedirects: 3,
     });
 
-    const allowOrigin = response.headers['access-control-allow-origin'];
-    const allowCredentials = response.headers['access-control-allow-credentials'] === 'true';
+    const body = String(response.data);
 
-    if (!allowOrigin) {
-      return null; // No CORS headers
-    }
-
-    let vulnerable = false;
-    let issue = '';
-
-    if (allowOrigin === '*') {
-      vulnerable = true;
-      issue = 'Wildcard origin allows any website to access resources';
-    } else if (allowOrigin === 'https://evil.com') {
-      vulnerable = true;
-      issue = 'Origin is reflected without validation - any origin is accepted';
-
-      if (allowCredentials) {
-        issue += ' (with credentials - CRITICAL)';
+    // Check for sensitive file content indicators
+    for (const indicator of targetFile.indicators) {
+      if (body.includes(indicator)) {
+        return {
+          vulnerable: true,
+          payload,
+          evidence: extractEvidence(body, indicator),
+          targetFile: targetFile.path,
+          parameter,
+          severity: 'CRITICAL',
+        };
       }
-    } else if (allowOrigin === 'null') {
-      vulnerable = true;
-      issue = 'Null origin allowed - can be exploited via sandboxed iframes';
     }
 
     return {
-      allowOrigin,
-      allowCredentials,
-      vulnerable,
-      issue,
+      vulnerable: false,
+      payload,
+      evidence: '',
+      targetFile: targetFile.path,
+      parameter,
+      severity: 'LOW',
     };
   } catch (error) {
-    return null;
+    return {
+      vulnerable: false,
+      payload,
+      evidence: '',
+      targetFile: targetFile.path,
+      parameter,
+      severity: 'LOW',
+    };
   }
+}
+
+/**
+ * Extract evidence snippet around the indicator
+ */
+function extractEvidence(body: string, indicator: string): string {
+  const index = body.indexOf(indicator);
+  if (index === -1) return '';
+  
+  const start = Math.max(0, index - 20);
+  const end = Math.min(body.length, index + indicator.length + 50);
+  return body.substring(start, end).replace(/\n/g, ' ').trim();
 }
 
 // ==================== HELPER FUNCTIONS ====================
@@ -604,38 +1025,49 @@ export function convertToVulnerabilities(
         id: `VULN-REDIRECT-${index + 1}`,
         title: lang === 'tr' ? 'Open Redirect Tespit Edildi' : 'Open Redirect Detected',
         description: lang === 'tr'
-          ? `${redirect.parameter} parametresi open redirect'e açık.`
-          : `${redirect.parameter} parameter is vulnerable to open redirect.`,
-        severity: 'Orta',
+          ? `${redirect.parameter} parametresi open redirect'e açık. Yönlendirme hedefi: ${redirect.redirectedTo}`
+          : `${redirect.parameter} parameter is vulnerable to open redirect. Redirect target: ${redirect.redirectedTo}`,
+        severity: lang === 'tr' ? 'Orta' : 'Medium',
         location: `Parameter: ${redirect.parameter}`,
         remediation: lang === 'tr'
-          ? 'Yönlendirme URL\'lerini whitelist ile doğrulayın. Harici URL\'lere yönlendirmeye izin vermeyin.'
-          : 'Validate redirect URLs against a whitelist. Do not allow redirects to external URLs.',
+          ? 'Yönlendirme URL\'lerini whitelist ile doğrulayın. Harici URL\'lere yönlendirmeye izin vermeyin. Relative URL\'ler kullanın.'
+          : 'Validate redirect URLs against a whitelist. Do not allow redirects to external URLs. Use relative URLs.',
         cvssScore: 5.5,
-        exploitExample: `?${redirect.parameter}=https://evil.com`,
+        exploitExample: redirect.exploitUrl,
         exploitablePaths: [{
           description: lang === 'tr' ? 'Phishing' : 'Phishing',
           scenario: lang === 'tr' ? 'Saldırgan kullanıcıları sahte sitelere yönlendirebilir' : 'Attacker can redirect users to fake sites',
           impact: lang === 'tr' ? 'Kimlik bilgisi hırsızlığı' : 'Credential theft',
         }],
         relatedCves: ['CWE-601'],
+        payload: redirect.payload,
       });
     });
 
   // CORS
   if (results.cors?.vulnerable) {
+    const corsSeverity = results.cors.severity || (results.cors.allowCredentials ? 'CRITICAL' : 'HIGH');
+    const severityText = corsSeverity === 'CRITICAL' ? (lang === 'tr' ? 'Kritik' : 'Critical') :
+                         corsSeverity === 'HIGH' ? (lang === 'tr' ? 'Yüksek' : 'High') :
+                         corsSeverity === 'MEDIUM' ? (lang === 'tr' ? 'Orta' : 'Medium') :
+                         (lang === 'tr' ? 'Düşük' : 'Low');
+    
+    const cvssScore = corsSeverity === 'CRITICAL' ? 9.1 :
+                      corsSeverity === 'HIGH' ? 7.5 :
+                      corsSeverity === 'MEDIUM' ? 5.3 : 3.1;
+    
     vulnerabilities.push({
       id: 'VULN-CORS-1',
       title: lang === 'tr' ? 'CORS Yanlış Yapılandırması' : 'CORS Misconfiguration',
       description: lang === 'tr'
         ? `CORS politikası güvensiz. ${results.cors.issue}`
         : `CORS policy is insecure. ${results.cors.issue}`,
-      severity: results.cors.allowCredentials ? 'Kritik' : 'Yüksek',
+      severity: severityText,
       location: 'Access-Control-Allow-Origin Header',
       remediation: lang === 'tr'
-        ? 'Sadece güvenilen origin\'lere izin verin. Wildcard (*) kullanmayın.'
-        : 'Only allow trusted origins. Do not use wildcard (*).',
-      cvssScore: results.cors.allowCredentials ? 8.5 : 6.5,
+        ? 'Sadece güvenilen origin\'lere izin verin. Wildcard (*) kullanmayın. Credentials ile birlikte wildcard kullanmayın.'
+        : 'Only allow trusted origins. Do not use wildcard (*). Never use wildcard with credentials.',
+      cvssScore,
       exploitExample: 'curl -H "Origin: https://evil.com" [TARGET]',
       exploitablePaths: [{
         description: lang === 'tr' ? 'Cross-Origin Data Theft' : 'Cross-Origin Data Theft',
@@ -643,8 +1075,48 @@ export function convertToVulnerabilities(
         impact: lang === 'tr' ? 'Hassas veri sızıntısı' : 'Sensitive data leak',
       }],
       relatedCves: ['CWE-942'],
+      testedOrigins: results.cors.testedOrigins,
     });
   }
 
+  // Directory Traversal
+  results.directoryTraversal
+    .filter(d => d.vulnerable)
+    .forEach((traversal, index) => {
+      vulnerabilities.push({
+        id: `VULN-TRAVERSAL-${index + 1}`,
+        title: lang === 'tr' ? 'Directory Traversal Tespit Edildi' : 'Directory Traversal Detected',
+        description: lang === 'tr'
+          ? `${traversal.parameter} parametresi directory traversal'a açık. Hedef dosya: ${traversal.targetFile}. Kanıt: ${traversal.evidence}`
+          : `${traversal.parameter} parameter is vulnerable to directory traversal. Target file: ${traversal.targetFile}. Evidence: ${traversal.evidence}`,
+        severity: 'Kritik',
+        location: `Parameter: ${traversal.parameter}`,
+        remediation: lang === 'tr'
+          ? 'Kullanıcı girdilerini dosya yollarında kullanmayın. Whitelist yaklaşımı kullanın. Dosya erişimini chroot veya sandbox ile sınırlayın.'
+          : 'Do not use user input in file paths. Use whitelist approach. Restrict file access with chroot or sandbox.',
+        cvssScore: 9.1,
+        exploitExample: `?${traversal.parameter}=${encodeURIComponent(traversal.payload)}`,
+        exploitablePaths: [{
+          description: lang === 'tr' ? 'Hassas Dosya Okuma' : 'Sensitive File Read',
+          scenario: lang === 'tr' ? 'Saldırgan sunucudaki hassas dosyaları okuyabilir' : 'Attacker can read sensitive files on the server',
+          impact: lang === 'tr' ? 'Sistem bilgisi sızıntısı, kimlik bilgisi hırsızlığı' : 'System information leak, credential theft',
+        }],
+        relatedCves: ['CWE-22', 'CWE-23'],
+      });
+    });
+
   return vulnerabilities;
 }
+
+// ==================== EXPORTS FOR TESTING ====================
+
+export {
+  TRAVERSAL_PATTERNS,
+  TRAVERSAL_TARGET_FILES,
+  TRAVERSAL_PARAMS,
+  extractEvidence,
+  CORS_TEST_ORIGINS,
+  generateSubdomainOrigins,
+  REDIRECT_PARAMS,
+  REDIRECT_PAYLOADS,
+};
