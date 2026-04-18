@@ -4,12 +4,12 @@
 
 # SecuriScan AI
 
-**Advanced AI-powered security vulnerability scanner** with real-time analysis, comprehensive reporting, and multi-language support.
+**Advanced web security vulnerability scanner** with real-time analysis, comprehensive reporting, and multi-language support.
 
 ## Features
 
 ### Core Scanning
-- **AI-Powered Analysis**: Leverages Google Gemini via OpenRouter for intelligent security scanning
+- **Comprehensive Analysis**: 15+ modular security scanners covering OWASP Top 10
 - **Real-time Terminal Interface**: Interactive terminal-style scanning experience
 - **Multi-language Support**: Full Turkish and English localization
 - **Secure Architecture**: Backend API with SSRF protection, rate limiting, and security headers
@@ -30,6 +30,7 @@
 - **Robots.txt Analysis**: Extracts sensitive paths and admin panels
 - **Security.txt Check**: Validates security contact information presence
 - **CVE Correlation**: Maps detected technologies to known vulnerabilities
+- **Active Scanning**: SQLi, XSS, and sensitive file detection
 
 ### Reporting & Export
 - **PDF Reports**: Professional reports with executive summary, vulnerability tables, and action plans
@@ -40,11 +41,11 @@
 
 ## Architecture
 
-### Backend (Express.js)
+### Backend (Express.js 5)
 - **Server**: Express on port 3001
-- **API Integration**: OpenRouter (Google Gemini model)
 - **Security**: Helmet, CORS, rate limiting (10 req/15min), SSRF protection
 - **Scanners**: Modular scanner architecture with 15+ security modules
+- **Services**: GeoIP, WHOIS, scan progress (SSE)
 
 ### Frontend (React + Vite)
 - **Framework**: React 19 with TypeScript
@@ -62,22 +63,24 @@ securiscan-ai/
 ├── server/                          # Express backend
 │   ├── config/                      # Environment configuration
 │   ├── middleware/                   # CORS, rate limiting, error handling
-│   ├── services/                    # OpenRouter, GeoIP, WHOIS services
+│   ├── services/                    # GeoIP, WHOIS, scan progress
 │   ├── routes/                      # API endpoints
 │   ├── scanners/                    # Security scanner modules
-│   │   ├── ssl-scanner.ts           # SSL/TLS analysis
-│   │   ├── header-scanner.ts        # HTTP header analysis
-│   │   ├── port-scanner.ts          # Port scanning
-│   │   ├── dns-scanner.ts           # DNS enumeration
-│   │   ├── tech-detector.ts         # Technology detection
-│   │   ├── active-scanner.ts        # CORS, XSS, SQLi, traversal tests
-│   │   ├── http-methods-scanner.ts  # HTTP method testing
-│   │   ├── robots-scanner.ts        # Robots.txt & security.txt
-│   │   ├── cve-correlator.ts        # CVE database correlation
-│   │   ├── vulnerability-detector.ts # Vulnerability aggregation
-│   │   ├── scoring-engine.ts        # Security score calculation
-│   │   └── action-plan-generator.ts # Remediation planning
-│   └── utils/                       # URL validator, constants
+│   │   ├── ssl-scanner.ts
+│   │   ├── header-scanner.ts
+│   │   ├── port-scanner.ts
+│   │   ├── dns-scanner.ts
+│   │   ├── tech-detector.ts
+│   │   ├── active-scanner.ts
+│   │   ├── http-methods-scanner.ts
+│   │   ├── robots-scanner.ts
+│   │   ├── cve-correlator.ts
+│   │   ├── vulnerability-detector.ts
+│   │   ├── scoring-engine.ts
+│   │   ├── content-analyzer.ts
+│   │   ├── compliance-checker.ts
+│   │   └── action-plan-generator.ts
+│   └── utils/                       # URL validator, ports, constants
 │
 └── src/                             # React frontend
     ├── config/                      # App constants and API endpoints
@@ -85,7 +88,7 @@ securiscan-ai/
     ├── i18n/                        # Translations (tr/en)
     ├── lib/                         # API client and utilities
     ├── hooks/                       # Custom React hooks
-    ├── services/                    # Backend API calls
+    ├── services/                    # Backend API calls, PDF/JSON export
     ├── features/                    # Feature-based components
     │   ├── scanner/                 # Scan terminal and input
     │   └── report/                  # Dashboard and vulnerability cards
@@ -96,7 +99,6 @@ securiscan-ai/
 
 ### Prerequisites
 - Node.js 18+ and npm
-- OpenRouter API key (optional — mock mode available for development)
 
 ### Installation
 
@@ -113,20 +115,12 @@ securiscan-ai/
 
 3. **Configure environment variables**
 
-   Create `.env.local` from the example:
+   Create a `.env.local` file in the project root:
    ```bash
-   cp .env.example .env.local
-   ```
-
-   Edit `.env.local` and set your OpenRouter API key:
-   ```bash
-   OPENROUTER_API_KEY=sk-or-v1-your_api_key_here
    PORT=3001
    NODE_ENV=development
    CLIENT_URL=http://localhost:3000
    ```
-
-   **Note**: If you don't have an API key, the app will run in **mock mode** with sample data.
 
 4. **Run the application**
 
@@ -151,12 +145,12 @@ securiscan-ai/
 ## Security Features
 
 ### Backend Security
-- **API Key Protection**: API keys never exposed to client bundle
 - **SSRF Prevention**: Blocks localhost and private IP scanning
 - **Rate Limiting**: 10 requests per 15 minutes per IP
 - **Security Headers**: Helmet.js for HTTP security headers
-- **CORS**: Configured for localhost development
+- **CORS**: Configured for allowed origins
 - **Input Validation**: Server-side URL validation
+- **No Secrets in Bundle**: API keys stay server-side only
 
 ### Scanning Capabilities
 | Scanner | Description | Severity Range |
@@ -167,6 +161,7 @@ securiscan-ai/
 | Directory Traversal | Path traversal vulnerabilities | CRITICAL |
 | Open Redirect | URL redirect vulnerabilities | MEDIUM |
 | HTTP Methods | Dangerous method detection | MEDIUM - HIGH |
+| Active Scanner | SQLi, XSS, sensitive files | MEDIUM - CRITICAL |
 | CVE Correlation | Known vulnerability mapping | LOW - CRITICAL |
 
 ## Testing
