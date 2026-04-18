@@ -59,14 +59,7 @@ export interface SecurityReport {
     type: string;
     risk: string;
   }>;
-  darkWebLeaks: Array<{
-    source: string;
-    date: string;
-    type: string;
-    severity: 'HIGH' | 'MEDIUM';
-  }>;
   actionPlan: ActionPlanItem[];
-  isPremium?: boolean;
   scanPhases?: {
     activeScanning: boolean;
     enhancedSubdomains: boolean;
@@ -500,10 +493,8 @@ export async function performSecurityScan(
     },
     subdomains,
     sensitiveFiles,
-    darkWebLeaks: [], // TODO: Integrate Have I Been Pwned API
     actionPlan,
     compliance,
-    isPremium,
     scanPhases: {
       activeScanning: activeVulns.length > 0 || sensitiveFiles.length > 0,
       enhancedSubdomains: isPremium,

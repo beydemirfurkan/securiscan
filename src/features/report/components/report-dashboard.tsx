@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { SecurityReport, Severity, TechStackItem, ActionPlanItem } from '../../../types';
+import { SecurityReport, Severity, TechStackItem } from '../../../types';
 import VulnerabilityCard from './vulnerability-card';
 import { translations } from '../../../i18n';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { X, Download, Shield, Globe, FileText, Lock, Settings, ChevronRight, AlertTriangle, Map, Database, Eye, Clock, Zap, ExternalLink, Cpu, TrendingDown, ArrowUpDown, ChevronUp, ChevronDown, Loader2, CheckCircle, XCircle, Server, FileSearch, Bug, ShieldAlert, FolderSearch } from 'lucide-react';
 import { exportToPdf, exportToJson } from '../../../services/report-exporter.service';
+import { APP_CONFIG } from '../../../config/constants';
 
 interface Props {
   report: SecurityReport;
@@ -181,7 +182,7 @@ const ReportDashboard: React.FC<Props> = ({ report, onReset, lang }) => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-8">
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <span className="bg-cyber-green/20 text-cyber-green text-[10px] font-bold px-2 py-0.5 rounded border border-cyber-green/30 uppercase tracking-widest">PRO ANALİZ</span>
+            <span className="bg-cyber-green/20 text-cyber-green text-[10px] font-bold px-2 py-0.5 rounded border border-cyber-green/30 uppercase tracking-widest">v{APP_CONFIG.version}</span>
             <h2 className="text-3xl font-bold text-white font-mono flex items-center gap-3">
               {t.reportTitle}
             </h2>
@@ -357,7 +358,7 @@ const ReportDashboard: React.FC<Props> = ({ report, onReset, lang }) => {
                 <h3 className="text-white font-bold text-lg">{t.summaryFindings}</h3>
              </div>
              <p className="text-gray-400 text-sm leading-relaxed mb-6 italic">"{report.summary}"</p>
-             <div className="grid grid-cols-3 gap-4 border-t border-gray-800 pt-6">
+             <div className="grid grid-cols-2 gap-4 border-t border-gray-800 pt-6">
                 <div>
                    <span className="text-[10px] text-gray-500 uppercase block mb-1">{t.vulnerabilitiesDetected}</span>
                    <span className="text-2xl font-bold text-white font-mono">{report.vulnerabilities.length}</span>
@@ -365,10 +366,6 @@ const ReportDashboard: React.FC<Props> = ({ report, onReset, lang }) => {
                 <div>
                    <span className="text-[10px] text-gray-500 uppercase block mb-1">{t.subdomainsCount}</span>
                    <span className="text-2xl font-bold text-white font-mono">{report.subdomains.length}</span>
-                </div>
-                <div>
-                   <span className="text-[10px] text-gray-500 uppercase block mb-1">{t.leaksCount}</span>
-                   <span className="text-2xl font-bold text-red-500 font-mono">{report.darkWebLeaks.length}</span>
                 </div>
              </div>
           </div>

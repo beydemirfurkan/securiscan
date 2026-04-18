@@ -1,18 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import ScanTerminal from './features/scanner/components/scan-terminal';
 import ReportDashboard from './features/report/components/report-dashboard';
-import PaywallOverlay from './features/paywall/components/paywall-overlay';
 import { useTranslation } from './i18n';
 import { useScan } from './hooks/use-scan';
 import { ShieldAlert, ShieldCheck, Zap, Cpu, Globe, Languages } from 'lucide-react';
+import { APP_CONFIG } from './config/constants';
 
 const App: React.FC = () => {
-  const [isPaid, setIsPaid] = useState(false);
-
-  // Language management with i18n hook
   const { lang, t, changeLanguage } = useTranslation();
 
-  // Scan management with custom hook
   const {
     url,
     setUrl,
@@ -29,34 +25,27 @@ const App: React.FC = () => {
     refetchReport,
   } = useScan(lang);
 
-  // Re-fetch report when language changes to localize content
-  // Using a ref to track previous language to avoid infinite loops
   const prevLangRef = React.useRef(lang);
   useEffect(() => {
-    // Only refetch if language actually changed (not on initial render or report change)
     if (prevLangRef.current !== lang && report && status === 'COMPLETE') {
       refetchReport(report.targetUrl);
     }
     prevLangRef.current = lang;
-  }, [lang]); // eslint-disable-line react-hooks/exhaustive-deps
-
+  }, [lang, report, status, refetchReport]);
 
   const startScanProcess = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsPaid(false);
     startScan(url);
   };
 
   const resetApp = () => {
     reset();
-    setIsPaid(false);
   };
 
   return (
     <div className="min-h-screen bg-cyber-black text-gray-200 selection:bg-cyber-green selection:text-black font-sans flex flex-col overflow-x-hidden">
-      {/* Background Matrix/Grid Decor */}
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 opacity-[0.03]" 
+        <div className="absolute inset-0 opacity-[0.03]"
              style={{ backgroundImage: 'linear-gradient(#00ff41 1px, transparent 1px), linear-gradient(90deg, #00ff41 1px, transparent 1px)', backgroundSize: '50px 50px' }}>
         </div>
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-cyber-green/5 blur-[120px] rounded-full"></div>
@@ -69,12 +58,11 @@ const App: React.FC = () => {
               <ShieldCheck className="w-6 h-6 text-cyber-green" />
             </div>
             <h1 className="text-xl font-bold tracking-tighter text-white">
-              SECURISCAN<span className="text-cyber-green">.V4</span>
+              SECURISCAN<span className="text-cyber-green">.AI</span>
             </h1>
           </div>
-          
+
           <div className="flex items-center gap-3">
-            {/* Advanced Language Selector */}
             <div className="flex items-center bg-white/5 border border-white/10 rounded-full p-1 shadow-inner">
               <div className="px-2 text-gray-500">
                 <Languages className="w-3.5 h-3.5" />
@@ -103,19 +91,19 @@ const App: React.FC = () => {
       <main className="relative z-10 flex-grow flex flex-col">
         {status === 'IDLE' && (
           <div className="flex-grow flex flex-col items-center justify-center py-12 px-4 max-w-7xl mx-auto w-full space-y-20 animate-fade-in">
-            
+
             <div className="text-center space-y-8 max-w-4xl mx-auto">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] font-mono text-cyber-green tracking-widest uppercase">
                 <Zap className="w-3 h-3" /> {t.tagline}
               </div>
-              
+
               <h2 className="text-4xl md:text-6xl tracking-tight leading-[1.1] text-white">
                 <span className="font-medium opacity-90">{t.heroTitle_1}</span> <br/>
                 <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyber-green via-emerald-400 to-blue-500">
                   {t.heroTitle_2}
                 </span>
               </h2>
-              
+
               <p className="text-gray-400 text-lg md:text-xl max-w-2xl mx-auto font-light leading-relaxed">
                 {t.heroSubtitle}
               </p>
@@ -136,7 +124,7 @@ const App: React.FC = () => {
                     placeholder={t.placeholder}
                     className={`flex-grow bg-transparent text-white px-2 py-4 focus:outline-none font-mono text-sm ${validationError ? 'placeholder-red-400' : 'placeholder-gray-600'}`}
                   />
-                  <button 
+                  <button
                     type="submit"
                     className="bg-cyber-green hover:bg-green-400 text-black font-bold px-8 py-4 rounded-xl transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(0,255,65,0.3)] hover:shadow-cyber-green/50 active:scale-95"
                   >
@@ -152,8 +140,7 @@ const App: React.FC = () => {
                 )}
               </form>
             </div>
-            
-            {/* Features Info */}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full mt-12">
               <div className="group bg-cyber-dark/50 border border-white/5 p-8 rounded-3xl hover:bg-cyber-dark hover:border-cyber-green/30 transition-all duration-500">
                 <h4 className="text-lg font-bold text-white mb-2">{t.feature1Title}</h4>
@@ -184,9 +171,9 @@ const App: React.FC = () => {
                </div>
              </div>
              <div className="relative z-10 w-full">
-               <ScanTerminal 
-                 onComplete={handleTerminalComplete} 
-                 lang={lang} 
+               <ScanTerminal
+                 onComplete={handleTerminalComplete}
+                 lang={lang}
                  scanId={scanId || undefined}
                  useSSE={false}
                />
@@ -196,10 +183,7 @@ const App: React.FC = () => {
 
         {status === 'COMPLETE' && report && (
           <div className="relative w-full p-4 md:p-8">
-             <div className={`transition-all duration-700 ${!isPaid ? 'filter blur-xl opacity-40 pointer-events-none h-[80vh] overflow-hidden' : ''}`}>
-                <ReportDashboard report={report} onReset={resetApp} lang={lang} />
-             </div>
-             {!isPaid && <PaywallOverlay onUnlock={() => setIsPaid(true)} onReset={resetApp} lang={lang} />}
+             <ReportDashboard report={report} onReset={resetApp} lang={lang} />
           </div>
         )}
 
@@ -219,9 +203,9 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-2">
              <ShieldCheck className="w-5 h-5 text-cyber-green/50" />
-             <span className="text-gray-500 text-xs font-mono">SECURISCAN ENGINE v4.0.2 // {lang === 'tr' ? 'STABİL VERSİYON' : 'STABLE RELEASE'}</span>
+             <span className="text-gray-500 text-xs font-mono">SECURISCAN ENGINE v{APP_CONFIG.version} // {lang === 'tr' ? 'STABİL VERSİYON' : 'STABLE RELEASE'}</span>
           </div>
-          <p className="text-gray-600 text-[10px] font-mono">&copy; {new Date().getFullYear()} GLOBAL DEFENSE SYSTEMS</p>
+          <p className="text-gray-600 text-[10px] font-mono">&copy; {new Date().getFullYear()} SecuriScan AI</p>
         </div>
       </footer>
     </div>

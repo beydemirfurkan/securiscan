@@ -29,7 +29,6 @@ export const TOP_100_PORTS = [
 
   // File Transfer
   21,    // FTP
-  22,    // SFTP (SSH)
   69,    // TFTP
 
   // DNS & Network
@@ -106,15 +105,13 @@ export const TOP_100_PORTS = [
   8083,  // HTTP Alt
   8084,  // HTTP Alt
   8085,  // HTTP Alt
-  9000,  // SonarQube
   9001,  // Supervisor
-  9090,  // Prometheus
   9091,  // Prometheus Pushgateway
   9100,  // Node Exporter
   9999,  // Generic
   10000, // Webmin
 
-  // Additional services to reach 100
+  // Additional services
   111,   // RPCbind
   179,   // BGP
   427,   // SLP
@@ -122,15 +119,12 @@ export const TOP_100_PORTS = [
   631,   // IPP (Printing)
   902,   // VMware
   3128,  // Squid Proxy
-  5000,  // UPnP
   5001,  // Synology DSM
   5222,  // XMPP
   5269,  // XMPP Server
   5357,  // WSDAPI
-  5432,  // PostgreSQL (duplicate check)
   5984,  // CouchDB
   6000,  // X11
-  6379,  // Redis (duplicate check)
   7001,  // WebLogic
   8089,  // Splunk
   8181,  // GlassFish

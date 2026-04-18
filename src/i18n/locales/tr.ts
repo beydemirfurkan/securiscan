@@ -41,10 +41,6 @@ export const tr = {
   openPorts: "AÇIK PORTLAR VE SERVİSLER",
   remediation: "ÇÖZÜM / REMEDIATION",
   exploitChain: "Detaylı İstismar Zinciri ve Etki Analizi",
-  paywallTitle: "Güvenlik Raporu Hazır",
-  paywallDesc: "Detaylı zafiyet analizini ve uyumluluk raporunu görüntülemek için kilidi açın.",
-  paywallPrice: "₺250",
-  paywallUnlock: "Ödeme Yap ve Görüntüle",
   riskLevels: {
     low: "DÜŞÜK RİSK",
     medium: "ORTA RİSK",

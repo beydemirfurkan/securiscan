@@ -2,14 +2,14 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# SecuriScan AI V4
+# SecuriScan AI
 
 **Advanced AI-powered security vulnerability scanner** with real-time analysis, comprehensive reporting, and multi-language support.
 
-## 🚀 Features
+## Features
 
 ### Core Scanning
-- **AI-Powered Analysis**: Leverages Google Gemini 3 Flash via OpenRouter for intelligent security scanning
+- **AI-Powered Analysis**: Leverages Google Gemini via OpenRouter for intelligent security scanning
 - **Real-time Terminal Interface**: Interactive terminal-style scanning experience
 - **Multi-language Support**: Full Turkish and English localization
 - **Secure Architecture**: Backend API with SSRF protection, rate limiting, and security headers
@@ -38,14 +38,13 @@
 - **Remediation Steps**: Actionable fix recommendations for each finding
 - **Compliance Checks**: OWASP, PCI-DSS, and GDPR compliance status
 
-## 🏗️ Architecture
+## Architecture
 
 ### Backend (Express.js)
 - **Server**: Express on port 3001
-- **API Integration**: OpenRouter (Google Gemini Flash model)
+- **API Integration**: OpenRouter (Google Gemini model)
 - **Security**: Helmet, CORS, rate limiting (10 req/15min), SSRF protection
 - **Scanners**: Modular scanner architecture with 15+ security modules
-- **Mock Mode**: Development mode with sample data when API key not configured
 
 ### Frontend (React + Vite)
 - **Framework**: React 19 with TypeScript
@@ -56,13 +55,13 @@
 - **State Management**: Custom hooks pattern
 - **i18n**: Centralized translation management
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 securiscan-ai/
 ├── server/                          # Express backend
 │   ├── config/                      # Environment configuration
-│   ├── middleware/                  # CORS, rate limiting, error handling
+│   ├── middleware/                   # CORS, rate limiting, error handling
 │   ├── services/                    # OpenRouter, GeoIP, WHOIS services
 │   ├── routes/                      # API endpoints
 │   ├── scanners/                    # Security scanner modules
@@ -87,20 +86,17 @@ securiscan-ai/
     ├── lib/                         # API client and utilities
     ├── hooks/                       # Custom React hooks
     ├── services/                    # Backend API calls
-    │   ├── pdf-generator.service.ts # PDF report generation
-    │   └── report-exporter.service.ts # Export orchestration
     ├── features/                    # Feature-based components
     │   ├── scanner/                 # Scan terminal and input
-    │   ├── report/                  # Dashboard and vulnerability cards
-    │   └── paywall/                 # Premium features overlay
+    │   └── report/                  # Dashboard and vulnerability cards
     └── components/                  # Shared UI components
 ```
 
-## 🛠️ Setup Instructions
+## Setup
 
 ### Prerequisites
 - Node.js 18+ and npm
-- OpenRouter API key (or use mock mode for development)
+- OpenRouter API key (optional — mock mode available for development)
 
 ### Installation
 
@@ -152,7 +148,7 @@ securiscan-ai/
    - Frontend: http://localhost:3000 (or auto-assigned port)
    - Backend API: http://localhost:3001
 
-## 🔒 Security Features
+## Security Features
 
 ### Backend Security
 - **API Key Protection**: API keys never exposed to client bundle
@@ -173,7 +169,7 @@ securiscan-ai/
 | HTTP Methods | Dangerous method detection | MEDIUM - HIGH |
 | CVE Correlation | Known vulnerability mapping | LOW - CRITICAL |
 
-## 🧪 Testing
+## Testing
 
 Run the test suite:
 ```bash
@@ -187,7 +183,7 @@ The project includes 79+ tests covering:
 - Robots Scanner (parsing, sensitive path detection)
 - Report Exporter (JSON round-trip, filename generation)
 
-## 📦 Build & Deployment
+## Build & Deployment
 
 ### Build for production
 ```bash
@@ -208,7 +204,7 @@ This creates:
 - Vercel, Netlify, Cloudflare Pages
 - Configure API proxy to backend URL
 
-## 🌐 Available Scripts
+## Available Scripts
 
 | Command | Description |
 |---------|-------------|
@@ -219,7 +215,7 @@ This creates:
 | `npm run build:server` | Build server only (TypeScript compilation) |
 | `npm test` | Run test suite with Vitest |
 
-## 🧩 Technology Stack
+## Technology Stack
 
 ### Frontend
 - **React 19** - UI library
@@ -232,7 +228,7 @@ This creates:
 - **Axios** - HTTP client
 
 ### Backend
-- **Express.js** - Web framework
+- **Express.js 5** - Web framework
 - **TypeScript** - Type safety
 - **Axios** - HTTP client for scanning
 - **Helmet** - Security headers
@@ -243,47 +239,7 @@ This creates:
 - **Vitest** - Test runner
 - **fast-check** - Property-based testing
 
-## 📝 Development Notes
-
-### Mock Mode
-When `OPENROUTER_API_KEY=PLACEHOLDER_API_KEY` in `.env.local`, the app runs in mock mode with sample vulnerability data. Perfect for:
-- Frontend development
-- UI testing
-- Demo purposes
-
-### Adding New Scanners
-1. Create scanner module in `server/scanners/`
-2. Export scan function and vulnerability converter
-3. Import and integrate in `server/scanners/index.ts`
-4. Add tests in `server/scanners/*.test.ts`
-
-### Adding New Languages
-1. Create new locale file: `src/i18n/locales/{lang}.ts`
-2. Add to translations export in `src/i18n/index.ts`
-3. Update `Language` type in `src/i18n/types.ts`
-
-## 🐛 Troubleshooting
-
-### Port Already in Use
-If port 3001 is busy, change `PORT` in `.env.local`:
-```bash
-PORT=3002
-```
-
-### API Key Error
-Ensure `.env.local` exists and contains valid `OPENROUTER_API_KEY`. For development without API key, use:
-```bash
-OPENROUTER_API_KEY=PLACEHOLDER_API_KEY
-```
-
-### CORS Issues
-Check `CLIENT_URL` in `.env.local` matches your frontend URL.
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please ensure:
 - Kebab-case file naming
@@ -292,7 +248,6 @@ Contributions are welcome! Please ensure:
 - Modular component structure
 - Tests for new scanners
 
----
+## License
 
-**SECURISCAN ENGINE v4.1.0 // ENHANCED SECURITY RELEASE**
-© 2025 GLOBAL DEFENSE SYSTEMS
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

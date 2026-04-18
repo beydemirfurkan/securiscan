@@ -11,7 +11,6 @@ import { corsMiddleware } from './middleware/cors';
 import { generalRateLimiter } from './middleware/rate-limit';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
 import scanRoutes from './routes/scan.routes';
-import paymentRoutes from './routes/payment.routes';
 
 // Initialize Express app
 const app = express();
@@ -45,11 +44,6 @@ app.get('/api/health', (req, res) => {
 // Scan endpoint
 app.use('/api/scan', scanRoutes);
 
-// Payment endpoints
-app.use('/api/payment', paymentRoutes);
-
-// ===== ERROR HANDLING =====
-// 404 handler (must be after all routes)
 app.use(notFoundHandler);
 
 // Global error handler (must be last)
@@ -57,23 +51,7 @@ app.use(errorHandler);
 
 // ===== START SERVER =====
 app.listen(PORT, () => {
-  console.log('');
-  console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║                                                           ║');
-  console.log('║            🛡️  SecuriScan AI Backend Server              ║');
-  console.log('║                                                           ║');
-  console.log('╚═══════════════════════════════════════════════════════════╝');
-  console.log('');
-  console.log(`  🚀 Server running on: http://localhost:${PORT}`);
-  console.log(`  🌍 Environment: ${NODE_ENV}`);
-  console.log(`  📊 Health check: http://localhost:${PORT}/api/health`);
-  console.log('');
-  console.log('  Available endpoints:');
-  console.log(`    • POST /api/scan - Security scanning`);
-  console.log(`    • POST /api/payment/verify - Payment verification`);
-  console.log('');
-  console.log('  Press Ctrl+C to stop the server');
-  console.log('');
+  console.log(`Server running on port ${PORT} (${NODE_ENV})`);
 });
 
 // Graceful shutdown

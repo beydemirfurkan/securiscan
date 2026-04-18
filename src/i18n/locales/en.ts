@@ -41,10 +41,6 @@ export const en = {
   openPorts: "OPEN PORTS & SERVICES",
   remediation: "REMEDIATION PLAN",
   exploitChain: "Detailed Exploit Chain & Impact Analysis",
-  paywallTitle: "Security Report Ready",
-  paywallDesc: "Unlock to view detailed vulnerability analysis and compliance report.",
-  paywallPrice: "$29",
-  paywallUnlock: "Pay and Unlock Report",
   riskLevels: {
     low: "LOW RISK",
     medium: "MEDIUM RISK",

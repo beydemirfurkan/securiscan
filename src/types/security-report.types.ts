@@ -68,13 +68,6 @@ export interface SubdomainInfo {
   status: 'ACTIVE' | 'CLOUDFLARE' | 'HIDDEN';
 }
 
-export interface DarkWebLeak {
-  source: string;
-  date: string;
-  type: string;
-  severity: 'HIGH' | 'MEDIUM';
-}
-
 export interface ActionPlanItem {
   task: string;
   priority: 'URGENT' | 'HIGH' | 'MEDIUM';
@@ -122,12 +115,8 @@ export interface SecurityReport {
   networkInfo: NetworkInfo;
   headers: HeaderAnalysis[];
   ssl: SSLInfo;
-  // Premium Features
   subdomains: SubdomainInfo[];
-  darkWebLeaks: DarkWebLeak[];
   actionPlan: ActionPlanItem[];
-  isPremium?: boolean; // Added for backend response
-  // New fields for enhanced scanning
   httpMethods?: {
     allowed: string[];
     dangerous: string[];
@@ -137,7 +126,6 @@ export interface SecurityReport {
     hasSecurityTxt: boolean;
   };
   cveCorrelations?: CVECorrelationResult[];
-  // Warnings for inconsistencies detected during scan
   warnings?: Array<{
     type: 'infrastructure' | 'configuration' | 'data';
     message: string;
